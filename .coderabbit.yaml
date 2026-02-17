@@ -1,0 +1,128 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Reference: https://docs.coderabbit.ai/reference/configuration
+
+language: "en-US"
+early_access: false
+enable_free_tier: true
+
+tone_instructions: >
+  Be direct and constructive. Focus on correctness, accessibility (WCAG 2.2 AA),
+  and i18n consistency (EN+JA). Flag security issues immediately.
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_in_walkthrough: false
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  poem: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+
+  # Ignore generated/config files that add noise to reviews
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/.next/**"
+    - "!**/.turbo/**"
+    - "!**/dist/**"
+    - "!**/pnpm-lock.yaml"
+    - "!**/*.tsbuildinfo"
+
+  path_instructions:
+    - path: "apps/web/app/**"
+      instructions: >
+        Next.js 15 App Router pages. Verify:
+        - Server Components are async and do NOT use "use client"
+        - Client Components have "use client" directive at top
+        - All user-facing strings use next-intl (getTranslations for Server, useTranslations for Client)
+        - Metadata exports include both title and description
+        - Dynamic params use `Promise<{ ... }>` pattern (Next.js 15)
+
+    - path: "apps/web/components/**"
+      instructions: >
+        React components. Verify:
+        - No God Components (5+ useState in one component)
+        - Custom hooks extracted when 3+ useState detected
+        - JSDoc with @param, @returns, and @example on all exports
+        - Tailwind classes use design system tokens (no hardcoded colors/arbitrary values)
+        - All interactive elements meet 44x44px minimum tap target (Apple HIG)
+
+    - path: "apps/web/components/exercise/**"
+      instructions: >
+        Sandpack exercise system. Verify:
+        - Exercise IDs match directories in packages/content/exercises/
+        - Sandpack theme colors come from shared constants, not inline hex values
+        - localStorage persistence uses versioned keys
+
+    - path: "apps/web/lib/actions/**"
+      instructions: >
+        Server Actions. Verify:
+        - "use server" directive present
+        - Auth check (session?.user?.id) before any mutation
+        - Verb-first naming convention (completeX, getX, isX)
+        - Return typed objects with success/error fields
+        - No revalidatePath unless using cached fetch (Next.js 16 default: no cache)
+
+    - path: "apps/web/app/api/**"
+      instructions: >
+        API routes. Verify:
+        - Webhook routes validate HMAC signatures
+        - External fetch calls check response.ok before parsing JSON
+        - Proper HTTP status codes in error responses
+        - No secrets in response bodies
+
+    - path: "packages/content/modules/**/*.mdx"
+      instructions: >
+        MDX lesson content. Verify:
+        - Frontmatter has: title, description, order, isFree
+        - isFree: true ONLY for module 00-foundation
+        - Exercise references (<Exercise id="..." />) match existing exercise directories
+        - Code examples use TypeScript, not JavaScript
+        - Japanese content (ja/) mirrors English (en/) structure exactly
+
+    - path: "packages/content/exercises/**"
+      instructions: >
+        Interactive exercises. Each exercise directory must contain:
+        - initial.tsx (student starting code with TODO comments)
+        - solution.tsx (reference implementation with JSDoc)
+        - tests.tsx (comprehensive test suite)
+        - meta.json (id, title.en, title.ja, difficulty, module, order, hints.en, hints.ja)
+        Verify hints are bilingual (EN + JA).
+
+    - path: "packages/database/**"
+      instructions: >
+        Prisma schema and database utilities. Verify:
+        - No raw SQL queries (use Prisma client)
+        - Unique constraints on userId+exerciseId for progress
+        - License keys have unique constraint
+
+    - path: "apps/web/messages/**"
+      instructions: >
+        next-intl message files. Verify:
+        - en.json and ja.json have identical key structures
+        - No missing keys in either locale
+        - Values are natural language (not machine-translated for ja.json)
+
+  tools:
+    eslint:
+      enabled: true
+    biome:
+      enabled: false
+    github-checks:
+      enabled: true
+      timeout_ms: 300000
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: "local"
+  web_search:
+    enabled: true
