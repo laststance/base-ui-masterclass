@@ -1,0 +1,41 @@
+{
+  "name": "@base-ui-masterclass/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@base-ui-masterclass/database": "workspace:*",
+    "@base-ui-masterclass/content": "workspace:*",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "next-mdx-remote": "^5.0.0",
+    "gray-matter": "^4.0.3",
+    "shiki": "^3.2.1",
+    "@codesandbox/sandpack-react": "^2.19.10",
+    "next-auth": "^5.0.0-beta.25",
+    "@auth/prisma-adapter": "^2.7.4",
+    "next-intl": "^4.1.4",
+    "lucide-react": "^0.475.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "typescript": "^5.7.3",
+    "@tailwindcss/postcss": "^4.0.9",
+    "tailwindcss": "^4.0.9",
+    "postcss": "^8.5.3",
+    "eslint": "^9.21.0",
+    "eslint-config-next": "^15.3.3",
+    "@playwright/test": "^1.51.1"
+  }
+}

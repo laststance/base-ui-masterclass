@@ -1,0 +1,9 @@
+@prisma/client
+@prisma/engines
+prisma
+esbuild
+@swc/core
+sharp
+unrs-resolver
+es5-ext
+@parcel/watcher
