@@ -21,6 +21,14 @@
     "completedBadge": "Completed",
     "lockedBadge": "Purchase Required"
   },
+  "login": {
+    "title": "Welcome back",
+    "subtitle": "Sign in to access your course",
+    "continueWithGitHub": "Continue with GitHub",
+    "continueWithGoogle": "Continue with Google",
+    "tos": "By signing in, you agree to our Terms of Service and Privacy Policy.",
+    "error": "Sign-in failed. Please try again."
+  },
   "paywall": {
     "signInTitle": "Sign in to access this lesson",
     "signInDescription": "This is a premium lesson. Sign in with your account and verify your license to continue.",

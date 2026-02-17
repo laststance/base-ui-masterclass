@@ -5,14 +5,33 @@ import { headers } from "next/headers";
 import { prisma } from "@base-ui-masterclass/database";
 
 /**
+ * Validates required OAuth environment variables at runtime.
+ * Called lazily on first session request to avoid build-time failures.
+ */
+function validateAuthEnv() {
+  const requiredEnvVars = [
+    "AUTH_GITHUB_ID",
+    "AUTH_GITHUB_SECRET",
+    "AUTH_GOOGLE_ID",
+    "AUTH_GOOGLE_SECRET",
+  ] as const;
+
+  const missing = requiredEnvVars.filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(", ")}`,
+    );
+  }
+}
+
+/**
  * BetterAuth server instance with Prisma adapter.
  * Supports GitHub and Google OAuth providers.
  *
  * @example
  * // In a Server Component or Server Action:
- * import { auth } from "@/lib/auth";
- * import { headers } from "next/headers";
- * const session = await auth.api.getSession({ headers: await headers() });
+ * import { auth, getSession } from "@/lib/auth";
+ * const session = await getSession();
  * if (session?.user?.id) { ... }
  */
 export const auth = betterAuth({
@@ -32,6 +51,21 @@ export const auth = betterAuth({
 });
 
 /**
+ * Convenience wrapper for getting the current session.
+ * Centralizes the headers() wiring for BetterAuth.
+ *
+ * @returns BetterAuth session or null if unauthenticated
+ *
+ * @example
+ * const session = await getSession();
+ * if (session?.user?.id) { ... }
+ */
+export async function getSession() {
+  validateAuthEnv();
+  return auth.api.getSession({ headers: await headers() });
+}
+
+/**
  * Session with purchase status for paywall checks.
  * Queries the Purchase table and attaches `hasPurchased` to the session.
  *
@@ -42,9 +76,7 @@ export const auth = betterAuth({
  * if (session?.hasPurchased) { // render premium content }
  */
 export async function getSessionWithPurchase() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+  const session = await getSession();
   if (!session) return null;
 
   const purchase = await prisma.purchase.findUnique({

@@ -21,6 +21,14 @@
     "completedBadge": "完了",
     "lockedBadge": "購入が必要です"
   },
+  "login": {
+    "title": "おかえりなさい",
+    "subtitle": "コースにアクセスするにはログインしてください",
+    "continueWithGitHub": "GitHubでログイン",
+    "continueWithGoogle": "Googleでログイン",
+    "tos": "ログインすることで、利用規約とプライバシーポリシーに同意したことになります。",
+    "error": "ログインに失敗しました。もう一度お試しください。"
+  },
   "paywall": {
     "signInTitle": "このレッスンにアクセスするにはログインが必要です",
     "signInDescription": "これはプレミアムレッスンです。アカウントにログインし、ライセンスを確認してください。",

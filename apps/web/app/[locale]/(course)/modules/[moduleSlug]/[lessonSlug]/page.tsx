@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getLocale } from "next-intl/server";
@@ -10,6 +11,32 @@ import {
 import { compileLessonMDX } from "@/lib/mdx";
 import { getSessionWithPurchase } from "@/lib/auth";
 import { PaywallGuard } from "@/components/course/paywall-guard";
+
+/**
+ * Generates SEO metadata for lesson pages.
+ *
+ * @param params - Route params with moduleSlug and lessonSlug
+ * @returns Metadata with lesson title and description
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ moduleSlug: string; lessonSlug: string }>;
+}): Promise<Metadata> {
+  const { moduleSlug, lessonSlug } = await params;
+  const locale = (await getLocale()) as Locale;
+  const moduleConfig = modules.find((m) => m.slug === moduleSlug);
+  const lesson = getLesson(moduleSlug, lessonSlug, locale);
+
+  if (!moduleConfig || !lesson) {
+    return { title: "Lesson Not Found" };
+  }
+
+  return {
+    title: `${lesson.title} — ${moduleConfig.title[locale]}`,
+    description: `${lesson.title} in Module ${moduleConfig.order}: ${moduleConfig.title[locale]}`,
+  };
+}
 
 /**
  * Lesson page — renders MDX content with syntax highlighting.

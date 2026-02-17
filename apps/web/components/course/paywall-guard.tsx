@@ -13,6 +13,7 @@ interface PaywallGuardProps {
  *
  * @param session - BetterAuth session with hasPurchased flag (null if unauthenticated)
  * @param children - Protected content to render for purchasers
+ * @returns Paywall UI for unauthenticated/non-purchased users, or children for purchasers
  *
  * @example
  * const session = await getSessionWithPurchase();
