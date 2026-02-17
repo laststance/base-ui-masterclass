@@ -1,0 +1,35 @@
+{
+  "id": "alert-dialog-basic",
+  "title": {
+    "en": "Build an AlertDialog Component",
+    "ja": "AlertDialogコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "08-overlays-2",
+  "order": 3,
+  "hints": {
+    "en": [
+      "AlertDialog is nearly identical to Dialog — start by copying the Dialog pattern",
+      "Use role='alertdialog' instead of role='dialog' for the content container",
+      "The Overlay must NOT have an onClick handler — backdrop clicks should be ignored",
+      "For Escape key, add e.preventDefault() to block dismissal instead of calling setOpen(false)",
+      "Focus should go to the data-autofocus element on open, which should be the Cancel button (safe action)",
+      "AlertDialog.Cancel calls setOpen(false) — closes without side effects",
+      "AlertDialog.Action calls onClick?.(e) first, THEN setOpen(false) — performs the action before closing",
+      "Use sentinel divs with tabIndex={0} and onFocus handlers for focus trap cycling",
+      "Return focus to triggerRef when open changes from true to false"
+    ],
+    "ja": [
+      "AlertDialogはDialogとほぼ同じです。Dialogパターンをコピーすることから始めます",
+      "コンテンツコンテナにはrole='dialog'の代わりにrole='alertdialog'を使用します",
+      "OverlayにはonClickハンドラを付けません。背景クリックは無視されるべきです",
+      "Escapeキーは、setOpen(false)を呼ぶ代わりにe.preventDefault()でブロックします",
+      "open時にdata-autofocus要素（Cancel ボタン＝安全な操作）にフォーカスします",
+      "AlertDialog.CancelはsetOpen(false)を呼び、副作用なしで閉じます",
+      "AlertDialog.ActionはまずonClick?.(e)を呼び、その後setOpen(false)で閉じます",
+      "tabIndex={0}とonFocusハンドラを持つセンチネルdivでフォーカストラップの循環を実装します",
+      "openがtrueからfalseに変わった時にtriggerRefにフォーカスを戻します"
+    ]
+  },
+  "dependencies": {}
+}

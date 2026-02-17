@@ -1,0 +1,333 @@
+---
+title: "Building a Tooltip Component"
+description: "Learn how to build an accessible Tooltip with hover/focus triggers, configurable delay, ARIA tooltip role, and portal rendering."
+order: 2
+isFree: false
+---
+
+# Building a Tooltip Component
+
+A **tooltip** is a small overlay that displays supplementary information when the user hovers over or focuses on a trigger element. Tooltips are non-interactive — they contain only text, never buttons or links. This distinction is important because it shapes the ARIA semantics and interaction model.
+
+## When to Use a Tooltip
+
+| Use Tooltip | Do Not Use Tooltip |
+|------------|-------------------|
+| Icon-only buttons that need a label | Content with links or buttons (use Popover) |
+| Abbreviations or jargon | Required form field descriptions (use visible text) |
+| Extra context for a concise label | Critical information the user must see (use inline text) |
+
+<Callout type="warning">
+Tooltips are invisible until triggered, so they must never contain essential information. If the user needs the content to complete a task, display it inline instead.
+</Callout>
+
+## ARIA Semantics
+
+The WAI-ARIA spec defines `role="tooltip"` for tooltip content:
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="tooltip"` | Floating element | Identifies the element as a tooltip |
+| `aria-describedby` | Trigger element | Links the trigger to the tooltip content |
+| `id` | Floating element | The value referenced by `aria-describedby` |
+
+When a screen reader encounters the trigger, it announces: "Button label... [pause] ...tooltip description." The `aria-describedby` relationship makes the tooltip content supplementary to the trigger's label.
+
+```tsx
+<button aria-describedby="tip-1">
+  <SaveIcon />
+</button>
+<div role="tooltip" id="tip-1">
+  Save document
+</div>
+```
+
+<Callout type="info">
+Use `aria-describedby` (not `aria-labelledby`) for tooltips. The tooltip provides a **description**, not the primary **label**. If your icon button has no visible text, add `aria-label` on the button as the primary label, and the tooltip as a supplementary description.
+</Callout>
+
+## Interaction Model
+
+### Trigger Events
+
+Tooltips respond to two input modalities:
+
+| Input | Show Event | Hide Event |
+|-------|-----------|-----------|
+| Mouse | `mouseenter` on trigger | `mouseleave` on trigger |
+| Keyboard | `focus` on trigger | `blur` on trigger |
+
+Both paths must work independently. A keyboard user tabbing through a form should see tooltips on focus, while a mouse user should see them on hover.
+
+### Open/Close Delay
+
+Tooltips should have a brief delay before appearing to prevent flickering when the user moves the mouse across multiple triggers quickly. A common pattern:
+
+- **Open delay**: 300-700ms (configurable)
+- **Close delay**: 0-150ms (allows cursor to briefly leave and re-enter)
+
+```tsx
+function useDelayedState(openDelay: number, closeDelay: number) {
+  const [open, setOpen] = React.useState(false);
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const show = React.useCallback(() => {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setOpen(true), openDelay);
+  }, [openDelay]);
+
+  const hide = React.useCallback(() => {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setOpen(false), closeDelay);
+  }, [closeDelay]);
+
+  const hideImmediately = React.useCallback(() => {
+    clearTimeout(timeoutRef.current);
+    setOpen(false);
+  }, []);
+
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => clearTimeout(timeoutRef.current);
+  }, []);
+
+  return { open, show, hide, hideImmediately };
+}
+```
+
+### Escape Key
+
+Pressing `Escape` should immediately close any open tooltip. This is critical for accessibility — a screen magnifier user might need the tooltip to disappear so they can see content underneath.
+
+## Component API Design
+
+```tsx
+interface TooltipProps {
+  content: React.ReactNode;       // Tooltip text content
+  openDelay?: number;             // Delay before showing (default: 400ms)
+  closeDelay?: number;            // Delay before hiding (default: 100ms)
+  placement?: Placement;          // Floating UI placement
+  children: React.ReactElement;   // The trigger element
+}
+```
+
+Compound components:
+
+- **`Tooltip.Provider`** — Optional shared delay group (avoids re-delay when moving between triggers).
+- **`Tooltip.Root`** — Manages open state, delay timers, and provides context.
+- **`Tooltip.Trigger`** — Wraps the anchor element with hover/focus handlers.
+- **`Tooltip.Content`** — The floating tooltip rendered through a portal.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+  type Placement,
+} from "@floating-ui/react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface TooltipContextValue {
+  open: boolean;
+  show: () => void;
+  hide: () => void;
+  hideImmediately: () => void;
+  tooltipId: string;
+  refs: ReturnType<typeof useFloating>["refs"];
+  floatingStyles: React.CSSProperties;
+}
+
+const TooltipContext = React.createContext<TooltipContextValue | null>(null);
+
+function useTooltipContext() {
+  const ctx = React.useContext(TooltipContext);
+  if (!ctx) throw new Error("Tooltip components must be used within Tooltip.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  openDelay = 400,
+  closeDelay = 100,
+  placement = "top",
+  children,
+}: {
+  openDelay?: number;
+  closeDelay?: number;
+  placement?: Placement;
+  children: React.ReactNode;
+}) {
+  const tooltipId = React.useId();
+  const { open, show, hide, hideImmediately } = useDelayedState(openDelay, closeDelay);
+
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement,
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  const ctx = React.useMemo(
+    () => ({ open, show, hide, hideImmediately, tooltipId, refs, floatingStyles }),
+    [open, show, hide, hideImmediately, tooltipId, refs, floatingStyles],
+  );
+
+  return <TooltipContext value={ctx}>{children}</TooltipContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({ children }: { children: React.ReactElement }) {
+  const { open, show, hide, hideImmediately, tooltipId, refs } = useTooltipContext();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape" && open) {
+      hideImmediately();
+    }
+  };
+
+  return React.cloneElement(children, {
+    ref: refs.setReference,
+    "aria-describedby": open ? tooltipId : undefined,
+    onMouseEnter: show,
+    onMouseLeave: hide,
+    onFocus: show,
+    onBlur: hideImmediately,
+    onKeyDown: handleKeyDown,
+  });
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, tooltipId, refs, floatingStyles } = useTooltipContext();
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      ref={refs.setFloating}
+      id={tooltipId}
+      role="tooltip"
+      style={floatingStyles}
+      className={className}
+      {...props}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+export const Tooltip = { Root, Trigger, Content };
+```
+
+## How `cloneElement` Works Here
+
+The `Trigger` component uses `React.cloneElement` to inject props onto the child element without wrapping it in an extra DOM node. This is a common pattern in headless UI libraries:
+
+```tsx
+// The user writes:
+<Tooltip.Trigger>
+  <button>Save</button>
+</Tooltip.Trigger>
+
+// The rendered output is just:
+<button aria-describedby="tooltip-id" ...>Save</button>
+// No wrapper div — the button IS the trigger
+```
+
+This preserves the trigger's original semantics and styling.
+
+<Callout type="tip">
+An alternative to `cloneElement` is the render prop pattern (`children` as a function) or using `Slot` components. Each has trade-offs, but `cloneElement` is the simplest for injecting a handful of props and refs.
+</Callout>
+
+## Usage Example
+
+```tsx
+function App() {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        <button aria-label="Save">
+          <SaveIcon />
+        </button>
+      </Tooltip.Trigger>
+      <Tooltip.Content className="tooltip">
+        Save your changes
+      </Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+```
+
+## CSS Strategies
+
+Tooltip styling should be minimal but clear:
+
+```css
+.tooltip {
+  background: var(--color-surface-inverse);
+  color: var(--color-text-inverse);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  max-width: 240px;
+  pointer-events: none; /* Tooltips are non-interactive */
+  z-index: 50;
+}
+```
+
+The `pointer-events: none` rule reinforces that tooltips are not interactive. Mouse events pass through the tooltip to elements beneath it.
+
+## Animation Considerations
+
+For smooth entry/exit animations, you need the tooltip to remain in the DOM briefly after closing. This requires a two-phase approach:
+
+1. Set a `data-state` attribute (`"open"` or `"closed"`)
+2. Use CSS transitions on `opacity` and `transform`
+3. Remove the element from the DOM after the transition completes
+
+```css
+.tooltip[data-state="open"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tooltip[data-state="closed"] {
+  opacity: 0;
+  transform: translateY(4px);
+}
+```
+
+<Callout type="info">
+Always respect `prefers-reduced-motion`. When the user prefers reduced motion, skip the transform animation and use a simple opacity fade or no animation at all.
+</Callout>
+
+## Key Takeaways
+
+1. **`role="tooltip"`** identifies the overlay as supplementary information.
+2. **`aria-describedby`** links the trigger to the tooltip so screen readers announce it.
+3. **Hover and focus** must both trigger the tooltip independently.
+4. **Open/close delays** prevent flickering when moving between triggers.
+5. **`Escape`** key must immediately close the tooltip.
+6. **Portal rendering** prevents CSS clipping from parent containers.
+7. **`pointer-events: none`** enforces the non-interactive nature of tooltips.
+
+## Try It Yourself
+
+<Exercise id="tooltip-basic" />

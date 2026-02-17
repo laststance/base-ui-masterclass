@@ -1,0 +1,29 @@
+{
+  "id": "slider-basic",
+  "title": {
+    "en": "Build a Slider Component",
+    "ja": "Sliderコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "11-advanced",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Apply role='slider' on the Thumb element, not the track or root",
+      "Set aria-valuenow, aria-valuemin, aria-valuemax, and aria-orientation on the thumb",
+      "Calculate percentage as ((value - min) / (max - min)) * 100 and expose it via context",
+      "Handle ArrowRight/ArrowUp to increment and ArrowLeft/ArrowDown to decrement by step",
+      "Home sets the value to min, End sets it to max",
+      "Use setPointerCapture on pointerdown to ensure smooth drag behavior"
+    ],
+    "ja": [
+      "role='slider'はトラックやルートではなくThumb要素に適用します",
+      "thumbにaria-valuenow、aria-valuemin、aria-valuemax、aria-orientationを設定します",
+      "パーセンテージを((value - min) / (max - min)) * 100で計算し、コンテキスト経由で公開します",
+      "ArrowRight/ArrowUpで増加、ArrowLeft/ArrowDownでstep分減少を処理します",
+      "Homeキーでminに、Endキーでmaxに値を設定します",
+      "pointerdownでsetPointerCaptureを使用し、スムーズなドラッグ動作を保証します"
+    ]
+  },
+  "dependencies": {}
+}

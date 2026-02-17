@@ -1,0 +1,520 @@
+---
+title: "Building a Select Component"
+description: "Build an accessible Select component with trigger, listbox popup, keyboard navigation, aria-activedescendant, and single selection."
+order: 2
+isFree: false
+---
+
+# Building a Select Component
+
+A **Select** component combines a trigger button with a popup listbox, allowing users to choose a single value from a list of options. Unlike the native `<select>` element, a custom Select gives you complete control over styling, animations, and option rendering — but you must implement the full accessibility contract yourself.
+
+## ARIA Roles and Relationships
+
+The Select widget involves several ARIA roles and attributes working together:
+
+| Element | Role/Attribute | Purpose |
+|---------|----------------|---------|
+| Trigger button | `role="combobox"` | Identifies as a combobox trigger |
+| Trigger button | `aria-haspopup="listbox"` | Announces a listbox will appear |
+| Trigger button | `aria-expanded` | Announces whether the popup is open |
+| Trigger button | `aria-activedescendant` | Points to the highlighted option's `id` |
+| Popup | `role="listbox"` | Groups the selectable options |
+| Each option | `role="option"` | Identifies as a selectable option |
+
+<Callout type="info">
+The WAI-ARIA combobox pattern uses `role="combobox"` for both Select (button trigger) and Combobox (input trigger). The distinction is that a Select's trigger is a button displaying the selected value, while a Combobox's trigger is a text input for filtering.
+</Callout>
+
+```tsx
+<button
+  role="combobox"
+  aria-haspopup="listbox"
+  aria-expanded={isOpen}
+  aria-activedescendant={isOpen ? activeOptionId : undefined}
+  aria-controls="listbox-id"
+>
+  {selectedLabel}
+</button>
+<ul role="listbox" id="listbox-id">
+  <li role="option" id="opt-1" aria-selected="true">Apple</li>
+  <li role="option" id="opt-2" aria-selected="false">Banana</li>
+</ul>
+```
+
+## Keyboard Navigation
+
+The Select must support these keyboard interactions:
+
+### When Closed
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `Space` | Open the listbox |
+| `ArrowDown` | Open the listbox, highlight first option |
+| `ArrowUp` | Open the listbox, highlight last option |
+
+### When Open
+
+| Key | Action |
+|-----|--------|
+| `ArrowDown` | Highlight the next option |
+| `ArrowUp` | Highlight the previous option |
+| `Home` | Highlight the first option |
+| `End` | Highlight the last option |
+| `Enter` / `Space` | Select the highlighted option and close |
+| `Escape` | Close without selecting |
+| `Tab` | Select the highlighted option and close |
+| Printable characters | Typeahead search |
+
+## Component API Design
+
+```tsx
+interface SelectProps {
+  value?: string;
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+  placeholder?: string;
+}
+
+interface OptionProps {
+  value: string;
+  disabled?: boolean;
+}
+```
+
+Compound components:
+
+- **`Select.Root`** — Manages open state, selected value, and highlighted index.
+- **`Select.Trigger`** — The button that opens the listbox.
+- **`Select.Content`** — The popup listbox container.
+- **`Select.Option`** — Individual selectable options.
+- **`Select.Value`** — Displays the selected value inside the trigger.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface SelectContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  selectedValue: string;
+  selectValue: (value: string) => void;
+  highlightedIndex: number;
+  setHighlightedIndex: (index: number) => void;
+  options: React.RefObject<{ value: string; label: string; id: string }[]>;
+  registerOption: (value: string, label: string, id: string) => void;
+  listboxId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+}
+
+const SelectContext = React.createContext<SelectContextValue | null>(null);
+
+function useSelectContext() {
+  const ctx = React.useContext(SelectContext);
+  if (!ctx) throw new Error("Select components must be used within Select.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  value: controlledValue,
+  defaultValue = "",
+  onValueChange,
+  children,
+}: SelectProps & { children: React.ReactNode }) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [selectedValue, setSelectedValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  const options = React.useRef<{ value: string; label: string; id: string }[]>([]);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const listboxId = `listbox-${React.useId()}`;
+
+  const current = controlledValue ?? selectedValue;
+
+  const selectValue = React.useCallback(
+    (val: string) => {
+      if (controlledValue === undefined) setSelectedValue(val);
+      onValueChange?.(val);
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    },
+    [controlledValue, onValueChange],
+  );
+
+  const registerOption = React.useCallback(
+    (value: string, label: string, id: string) => {
+      const exists = options.current.find((o) => o.value === value);
+      if (!exists) {
+        options.current.push({ value, label, id });
+      }
+    },
+    [],
+  );
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      selectedValue: current,
+      selectValue,
+      highlightedIndex,
+      setHighlightedIndex,
+      options,
+      registerOption,
+      listboxId,
+      triggerRef,
+    }),
+    [isOpen, current, selectValue, highlightedIndex, registerOption, listboxId],
+  );
+
+  return <SelectContext value={ctx}>{children}</SelectContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const {
+    isOpen,
+    setIsOpen,
+    highlightedIndex,
+    setHighlightedIndex,
+    options,
+    listboxId,
+    triggerRef,
+  } = useSelectContext();
+
+  const activeDescendant =
+    highlightedIndex >= 0
+      ? options.current[highlightedIndex]?.id
+      : undefined;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "Enter":
+      case " ":
+      case "ArrowDown": {
+        e.preventDefault();
+        setIsOpen(true);
+        setHighlightedIndex(
+          e.key === "ArrowUp" ? options.current.length - 1 : 0,
+        );
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        setIsOpen(true);
+        setHighlightedIndex(options.current.length - 1);
+        break;
+      }
+    }
+  };
+
+  return (
+    <button
+      ref={triggerRef}
+      role="combobox"
+      type="button"
+      aria-haspopup="listbox"
+      aria-expanded={isOpen}
+      aria-controls={listboxId}
+      aria-activedescendant={isOpen ? activeDescendant : undefined}
+      onClick={() => {
+        setIsOpen(!isOpen);
+        if (!isOpen) setHighlightedIndex(0);
+      }}
+      onKeyDown={handleKeyDown}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Value ---
+
+function Value({ placeholder = "Select..." }: { placeholder?: string }) {
+  const { selectedValue, options } = useSelectContext();
+  const selected = options.current.find((o) => o.value === selectedValue);
+  return <span>{selected ? selected.label : placeholder}</span>;
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const {
+    isOpen,
+    setIsOpen,
+    highlightedIndex,
+    setHighlightedIndex,
+    options,
+    selectValue,
+    listboxId,
+    triggerRef,
+  } = useSelectContext();
+
+  // Typeahead
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case "ArrowDown": {
+          e.preventDefault();
+          setHighlightedIndex(
+            Math.min(highlightedIndex + 1, options.current.length - 1),
+          );
+          break;
+        }
+        case "ArrowUp": {
+          e.preventDefault();
+          setHighlightedIndex(Math.max(highlightedIndex - 1, 0));
+          break;
+        }
+        case "Home": {
+          e.preventDefault();
+          setHighlightedIndex(0);
+          break;
+        }
+        case "End": {
+          e.preventDefault();
+          setHighlightedIndex(options.current.length - 1);
+          break;
+        }
+        case "Enter":
+        case " ": {
+          e.preventDefault();
+          if (highlightedIndex >= 0) {
+            selectValue(options.current[highlightedIndex].value);
+          }
+          break;
+        }
+        case "Escape": {
+          e.preventDefault();
+          setIsOpen(false);
+          triggerRef.current?.focus();
+          break;
+        }
+        case "Tab": {
+          if (highlightedIndex >= 0) {
+            selectValue(options.current[highlightedIndex].value);
+          }
+          break;
+        }
+        default: {
+          // Typeahead
+          if (e.key.length === 1) {
+            clearTimeout(timeoutRef.current);
+            bufferRef.current += e.key.toLowerCase();
+
+            const matchIndex = options.current.findIndex((opt) =>
+              opt.label.toLowerCase().startsWith(bufferRef.current),
+            );
+            if (matchIndex !== -1) {
+              setHighlightedIndex(matchIndex);
+            }
+
+            timeoutRef.current = setTimeout(() => {
+              bufferRef.current = "";
+            }, 500);
+          }
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, highlightedIndex, options, selectValue, setHighlightedIndex, setIsOpen, triggerRef]);
+
+  // Scroll highlighted option into view
+  React.useEffect(() => {
+    if (!isOpen || highlightedIndex < 0) return;
+    const optionId = options.current[highlightedIndex]?.id;
+    if (optionId) {
+      document.getElementById(optionId)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [isOpen, highlightedIndex, options]);
+
+  if (!isOpen) return null;
+
+  return (
+    <ul role="listbox" id={listboxId} {...props}>
+      {children}
+    </ul>
+  );
+}
+
+// --- Option ---
+
+function Option({
+  value,
+  children,
+  disabled = false,
+  ...props
+}: OptionProps & React.ComponentPropsWithoutRef<"li">) {
+  const {
+    selectedValue,
+    selectValue,
+    highlightedIndex,
+    setHighlightedIndex,
+    options,
+    registerOption,
+  } = useSelectContext();
+
+  const optionId = `option-${React.useId()}`;
+  const label = typeof children === "string" ? children : value;
+
+  React.useEffect(() => {
+    registerOption(value, label, optionId);
+  }, [value, label, optionId, registerOption]);
+
+  const index = options.current.findIndex((o) => o.value === value);
+  const isSelected = selectedValue === value;
+  const isHighlighted = highlightedIndex === index;
+
+  return (
+    <li
+      role="option"
+      id={optionId}
+      aria-selected={isSelected}
+      aria-disabled={disabled || undefined}
+      data-highlighted={isHighlighted || undefined}
+      data-state={isSelected ? "selected" : undefined}
+      onClick={() => {
+        if (!disabled) selectValue(value);
+      }}
+      onPointerMove={() => {
+        if (!disabled) setHighlightedIndex(index);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+export const Select = { Root, Trigger, Value, Content, Option };
+```
+
+## Focus Management Deep Dive
+
+The critical insight in Select's focus management is that **DOM focus stays on the trigger button** while the popup is open. The `aria-activedescendant` attribute on the trigger tells the screen reader which option is highlighted:
+
+```
+DOM focus: [Trigger button]
+  aria-activedescendant="option-banana"
+  → Screen reader announces: "Banana"
+```
+
+This approach avoids moving DOM focus into the popup, which would create challenges with focus trapping and restoration.
+
+<Callout type="warning">
+Never move DOM focus to individual `<li>` elements inside the popup. Keep focus on the trigger and use `aria-activedescendant`. Moving focus into the listbox breaks the expected interaction pattern and can confuse screen readers.
+</Callout>
+
+## Click-Outside to Close
+
+When the user clicks outside the Select popup, it should close without changing the selection:
+
+```tsx
+React.useEffect(() => {
+  if (!isOpen) return;
+
+  const handlePointerDown = (e: PointerEvent) => {
+    const target = e.target as Node;
+    const trigger = triggerRef.current;
+    const listbox = document.getElementById(listboxId);
+
+    if (trigger?.contains(target) || listbox?.contains(target)) return;
+    setIsOpen(false);
+  };
+
+  document.addEventListener("pointerdown", handlePointerDown);
+  return () => document.removeEventListener("pointerdown", handlePointerDown);
+}, [isOpen, listboxId, setIsOpen, triggerRef]);
+```
+
+## Styling Strategies
+
+### Highlighted vs. Selected Visual States
+
+These are two independent states — an option can be both selected and highlighted simultaneously:
+
+```css
+[role="option"][data-highlighted] {
+  background: var(--color-accent-subtle);
+}
+
+[role="option"][data-state="selected"] {
+  font-weight: 600;
+}
+
+/* Both states combined */
+[role="option"][data-highlighted][data-state="selected"] {
+  background: var(--color-accent-subtle);
+  font-weight: 600;
+}
+```
+
+### Positioning the Popup
+
+For production use, you would use a positioning library like Floating UI. For this course, absolute positioning is sufficient:
+
+```css
+.select-root {
+  position: relative;
+}
+
+.select-content {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+```
+
+## Common Pitfalls
+
+| Mistake | Why It Breaks |
+|---------|--------------|
+| Using `role="listbox"` on the trigger | The trigger is a `combobox`, the popup is the `listbox` |
+| Forgetting `aria-activedescendant` | Screen readers cannot track which option is highlighted |
+| Moving DOM focus into `<li>` elements | Breaks focus management, complicates focus restoration |
+| Not restoring focus to trigger on close | Keyboard user loses their place in the page |
+| Using `aria-selected` for highlighting | Highlighted and selected are different states |
+
+## Key Takeaways
+
+1. **Select = trigger (`combobox`) + popup (`listbox`).** Keep DOM focus on the trigger.
+2. **`aria-activedescendant`** on the trigger communicates the highlighted option to screen readers.
+3. **`aria-expanded`** tells users whether the popup is open or closed.
+4. **`aria-selected`** marks the currently selected value, not the highlighted option.
+5. **Typeahead** lets users jump to options by typing characters.
+6. **Click-outside** and **Escape** close the popup without changing the selection.
+7. **Focus restoration** to the trigger is essential when the popup closes.
+
+## Try It Yourself
+
+<Exercise id="select-basic" />

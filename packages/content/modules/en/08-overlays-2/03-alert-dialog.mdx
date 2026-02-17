@@ -1,0 +1,571 @@
+---
+title: "Building an AlertDialog Component"
+description: "Learn how to build an AlertDialog that prevents close on backdrop click, requires explicit user action, and uses role=alertdialog."
+order: 3
+isFree: false
+---
+
+# Building an AlertDialog Component
+
+An **AlertDialog** is a specialized dialog for critical confirmations and destructive actions. Unlike a standard dialog, an alert dialog **cannot be dismissed casually** — the user must explicitly choose an action (confirm or cancel). This prevents accidental data loss from a stray backdrop click or an unintentional Escape press.
+
+## AlertDialog vs. Dialog
+
+| Behavior | Dialog | AlertDialog |
+|----------|--------|-------------|
+| ARIA role | `role="dialog"` | `role="alertdialog"` |
+| Backdrop click closes | Yes | **No** |
+| Escape key closes | Yes | **No** (or closes to cancel) |
+| User must choose action | No — can dismiss freely | **Yes** — must click a button |
+| Typical use case | Forms, settings, info | Delete confirmation, data loss warning |
+
+The `alertdialog` role tells screen readers that this dialog requires an immediate response. Screen readers may announce it with a more urgent tone or behavior than a standard dialog.
+
+## When to Use AlertDialog
+
+| Use AlertDialog | Use Regular Dialog |
+|----------------|-------------------|
+| "Delete this file?" (irreversible) | "Edit profile" (dismissable form) |
+| "Unsaved changes will be lost" | "Share settings" (informational) |
+| "Are you sure you want to leave?" | "Select a date" (picker UI) |
+| "This action affects all users" | "View details" (read-only content) |
+
+<Callout type="warning">
+Do not overuse AlertDialog. If every confirmation uses an alert dialog, users become fatigued and start clicking through them without reading. Reserve them for genuinely destructive or irreversible actions.
+</Callout>
+
+## ARIA Semantics
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="alertdialog"` | Dialog container | Identifies as an alert dialog requiring action |
+| `aria-modal="true"` | Dialog container | Confines screen reader virtual cursor |
+| `aria-labelledby` | Dialog container | Points to the alert title |
+| `aria-describedby` | Dialog container | Points to the alert description |
+
+```tsx
+<div
+  role="alertdialog"
+  aria-modal="true"
+  aria-labelledby="alert-title"
+  aria-describedby="alert-desc"
+>
+  <h2 id="alert-title">Delete Project</h2>
+  <p id="alert-desc">
+    This will permanently delete the project and all its data.
+    This action cannot be undone.
+  </p>
+  <button>Cancel</button>
+  <button>Delete</button>
+</div>
+```
+
+<Callout type="info">
+The `alertdialog` role inherits from `dialog` — it gets all the same semantics (modal behavior, labeling) plus the additional "alert" semantics that signal urgency to assistive technology.
+</Callout>
+
+## Key Design Differences from Dialog
+
+### 1. No Backdrop Dismissal
+
+The overlay click handler is removed. Clicking the backdrop does nothing:
+
+```tsx
+// Dialog: overlay click closes
+<div onClick={() => setOpen(false)} aria-hidden="true" />
+
+// AlertDialog: overlay click does NOT close
+<div aria-hidden="true" /> // No onClick handler
+```
+
+### 2. Escape Key Behavior
+
+There are two valid approaches for Escape in an alert dialog:
+
+| Approach | Behavior | When to Use |
+|----------|----------|-------------|
+| **Disabled** | Escape does nothing | Maximum protection (default) |
+| **Cancel** | Escape triggers the cancel action | When there is a clear cancel button |
+
+For maximum safety, the default implementation disables Escape entirely:
+
+```tsx
+// Dialog: Escape closes
+if (e.key === "Escape") setOpen(false);
+
+// AlertDialog: Escape does nothing (or triggers cancel explicitly)
+if (e.key === "Escape") {
+  e.preventDefault();
+  // Optionally: onCancel?.();
+}
+```
+
+### 3. Initial Focus on Safe Action
+
+In an alert dialog, initial focus should go to the **least destructive action** — typically the "Cancel" button:
+
+```tsx
+// Inside the AlertDialog content, mark the cancel button:
+<button data-autofocus>Cancel</button>
+<button className="destructive">Delete</button>
+```
+
+This prevents the user from accidentally confirming a destructive action by pressing Enter immediately after the dialog opens.
+
+## Component API Design
+
+```tsx
+interface AlertDialogProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+```
+
+Compound components (same structure as Dialog):
+
+- **`AlertDialog.Root`** — Manages open/close state.
+- **`AlertDialog.Trigger`** — Button that opens the alert dialog.
+- **`AlertDialog.Portal`** — Renders children into a portal.
+- **`AlertDialog.Overlay`** — Non-dismissable backdrop.
+- **`AlertDialog.Content`** — The alert dialog panel with focus trap.
+- **`AlertDialog.Title`** — The alert heading.
+- **`AlertDialog.Description`** — The alert description.
+- **`AlertDialog.Cancel`** — Button that cancels (closes without action).
+- **`AlertDialog.Action`** — Button that confirms the destructive action.
+
+## Full Implementation
+
+The AlertDialog shares most of its implementation with Dialog. The key differences are highlighted:
+
+```tsx
+import * as React from "react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface AlertDialogContextValue {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  titleId: string;
+  descriptionId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}
+
+const AlertDialogContext =
+  React.createContext<AlertDialogContextValue | null>(null);
+
+function useAlertDialogContext() {
+  const ctx = React.useContext(AlertDialogContext);
+  if (!ctx)
+    throw new Error(
+      "AlertDialog components must be used within AlertDialog.Root",
+    );
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+}: AlertDialogProps & { children: React.ReactNode }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
+  const titleId = React.useId();
+  const descriptionId = React.useId();
+
+  const setOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [controlledOpen, onOpenChange],
+  );
+
+  const ctx = React.useMemo(
+    () => ({ open, setOpen, titleId, descriptionId, triggerRef, contentRef }),
+    [open, setOpen, titleId, descriptionId],
+  );
+
+  return (
+    <AlertDialogContext value={ctx}>{children}</AlertDialogContext>
+  );
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen, triggerRef } = useAlertDialogContext();
+
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      onClick={() => setOpen(true)}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Portal ---
+
+function Portal({ children }: { children: React.ReactNode }) {
+  const { open } = useAlertDialogContext();
+  if (!open) return null;
+  return createPortal(
+    <div data-portal="">{children}</div>,
+    document.body,
+  );
+}
+
+// --- Overlay (Non-dismissable) ---
+
+function Overlay({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  // KEY DIFFERENCE: No onClick handler
+  return (
+    <div
+      className={className}
+      data-alert-dialog-overlay=""
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, titleId, descriptionId, triggerRef, contentRef } =
+    useAlertDialogContext();
+
+  const getFocusableElements = () => {
+    if (!contentRef.current) return [];
+    return Array.from(
+      contentRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+  };
+
+  const handleSentinelFocus = (position: "start" | "end") => {
+    const focusable = getFocusableElements();
+    if (focusable.length === 0) return;
+    if (position === "start") {
+      focusable[focusable.length - 1].focus();
+    } else {
+      focusable[0].focus();
+    }
+  };
+
+  // Initial focus — prefer data-autofocus (should be the cancel button)
+  React.useEffect(() => {
+    if (!open || !contentRef.current) return;
+
+    const autoFocusTarget =
+      contentRef.current.querySelector<HTMLElement>("[data-autofocus]");
+    if (autoFocusTarget) {
+      autoFocusTarget.focus();
+      return;
+    }
+
+    const focusable = getFocusableElements();
+    if (focusable.length > 0) {
+      focusable[0].focus();
+    } else {
+      contentRef.current.focus();
+    }
+  }, [open]);
+
+  // KEY DIFFERENCE: Escape does NOT close the alert dialog
+  React.useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault(); // Block Escape dismissal
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
+  // Scroll lock
+  React.useEffect(() => {
+    if (!open) return;
+    const scrollY = window.scrollY;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.width = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [open]);
+
+  // Inert siblings
+  React.useEffect(() => {
+    if (!open) return;
+    const portal = contentRef.current?.closest("[data-portal]");
+    const siblings = Array.from(document.body.children).filter(
+      (el) => el !== portal,
+    );
+    siblings.forEach((el) => el.setAttribute("inert", ""));
+    return () => siblings.forEach((el) => el.removeAttribute("inert"));
+  }, [open]);
+
+  // Return focus on close
+  React.useEffect(() => {
+    if (!open) {
+      triggerRef.current?.focus();
+    }
+  }, [open, triggerRef]);
+
+  return (
+    <>
+      <div
+        tabIndex={0}
+        onFocus={() => handleSentinelFocus("start")}
+        aria-hidden="true"
+        style={{ position: "fixed", opacity: 0, pointerEvents: "none" }}
+      />
+      <div
+        ref={contentRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        className={className}
+        {...props}
+      >
+        {children}
+      </div>
+      <div
+        tabIndex={0}
+        onFocus={() => handleSentinelFocus("end")}
+        aria-hidden="true"
+        style={{ position: "fixed", opacity: 0, pointerEvents: "none" }}
+      />
+    </>
+  );
+}
+
+// --- Title ---
+
+function Title({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"h2">) {
+  const { titleId } = useAlertDialogContext();
+  return (
+    <h2 id={titleId} {...props}>
+      {children}
+    </h2>
+  );
+}
+
+// --- Description ---
+
+function Description({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"p">) {
+  const { descriptionId } = useAlertDialogContext();
+  return (
+    <p id={descriptionId} {...props}>
+      {children}
+    </p>
+  );
+}
+
+// --- Cancel ---
+
+function Cancel({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen } = useAlertDialogContext();
+  return (
+    <button type="button" onClick={() => setOpen(false)} {...props}>
+      {children}
+    </button>
+  );
+}
+
+// --- Action ---
+
+function Action({
+  children,
+  onClick,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen } = useAlertDialogContext();
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    onClick?.(e);
+    setOpen(false);
+  };
+
+  return (
+    <button type="button" onClick={handleClick} {...props}>
+      {children}
+    </button>
+  );
+}
+
+export const AlertDialog = {
+  Root,
+  Trigger,
+  Portal,
+  Overlay,
+  Content,
+  Title,
+  Description,
+  Cancel,
+  Action,
+};
+```
+
+## The Three Key Differences Summarized
+
+Looking at the implementation, the alert dialog differs from a standard dialog in exactly three places:
+
+```tsx
+// 1. Role
+role="alertdialog"      // instead of role="dialog"
+
+// 2. Overlay
+<div aria-hidden />     // No onClick (instead of onClick={close})
+
+// 3. Escape key
+e.preventDefault();     // Block Escape (instead of closing)
+```
+
+Everything else — focus trap, sentinels, inert, scroll lock, portal, return focus — is identical. This is intentional. The alert dialog is a **behavioral variant** of the dialog, not a fundamentally different component.
+
+## Usage Example
+
+```tsx
+function DeleteProjectAlert() {
+  const [open, setOpen] = React.useState(false);
+
+  const handleDelete = () => {
+    deleteProject(projectId);
+    // setOpen(false) is called automatically by Action
+  };
+
+  return (
+    <AlertDialog.Root open={open} onOpenChange={setOpen}>
+      <AlertDialog.Trigger>Delete Project</AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="alert-overlay" />
+        <AlertDialog.Content className="alert-content">
+          <AlertDialog.Title>Delete Project</AlertDialog.Title>
+          <AlertDialog.Description>
+            This will permanently delete "{projectName}" and all
+            associated data. This action cannot be undone.
+          </AlertDialog.Description>
+          <div className="alert-actions">
+            <AlertDialog.Cancel data-autofocus>
+              Cancel
+            </AlertDialog.Cancel>
+            <AlertDialog.Action onClick={handleDelete}>
+              Delete Forever
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+```
+
+## Composition: Sharing Code Between Dialog and AlertDialog
+
+In a real component library, you would extract the shared logic into a base component or shared hooks:
+
+```tsx
+// Shared hooks
+function useDialogState(props) { /* open/close state management */ }
+function useFocusTrap(open, contentRef) { /* sentinels + inert */ }
+function useScrollLock(open) { /* body scroll prevention */ }
+function useReturnFocus(open, triggerRef) { /* focus restoration */ }
+
+// Dialog uses all shared hooks + allows Escape + backdrop dismiss
+// AlertDialog uses all shared hooks + blocks Escape + blocks backdrop
+```
+
+This keeps the codebase DRY while making the behavioral differences explicit.
+
+## CSS Strategies
+
+Alert dialogs often use visual cues to communicate severity:
+
+```css
+.alert-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+  max-width: 400px;
+  width: calc(100% - 32px);
+  z-index: 51;
+}
+
+.alert-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+/* Destructive action button */
+.alert-actions button:last-child {
+  background: var(--color-destructive);
+  color: var(--color-destructive-foreground);
+}
+```
+
+<Callout type="tip">
+Place the destructive action button last (rightmost in LTR layouts). This follows the platform convention in macOS and Windows where the primary/destructive action is on the right, and the safe action (Cancel) is on the left.
+</Callout>
+
+## Key Takeaways
+
+1. **`role="alertdialog"`** signals urgency and required response to assistive technology.
+2. **No backdrop dismissal** — clicking the overlay does nothing.
+3. **Escape is blocked** — the user must explicitly choose an action.
+4. **Initial focus on the safe action** (Cancel) prevents accidental confirmation.
+5. **`Cancel` and `Action`** are semantic buttons — Cancel closes without side effects, Action performs the operation and then closes.
+6. **Shared infrastructure** — focus trap, scroll lock, portal, and return focus are identical to Dialog.
+7. **Use sparingly** — only for genuinely destructive or irreversible actions.
+
+## Try It Yourself
+
+<Exercise id="alert-dialog-basic" />

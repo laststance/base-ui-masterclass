@@ -1,0 +1,33 @@
+{
+  "id": "tooltip-basic",
+  "title": {
+    "en": "Build a Tooltip Component",
+    "ja": "Tooltipコンポーネントを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "07-overlays-1",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Use useState for open state and useRef for the timeout timer",
+      "show() should clearTimeout then setTimeout to set open to true after openDelay",
+      "hide() should clearTimeout then setTimeout to set open to false after closeDelay",
+      "hideImmediately() should clearTimeout and set open to false synchronously",
+      "Use React.cloneElement to inject ref, aria-describedby, and event handlers onto the trigger child",
+      "Set aria-describedby to the tooltipId only when open is true, undefined when closed",
+      "Use createPortal(content, document.body) to render the tooltip outside the component tree",
+      "Remember to clean up the timeout on unmount with useEffect cleanup"
+    ],
+    "ja": [
+      "open状態にはuseState、タイムアウトタイマーにはuseRefを使用します",
+      "show()はclearTimeoutしてからsetTimeoutでopenDelayの後にopenをtrueにします",
+      "hide()はclearTimeoutしてからsetTimeoutでcloseDelayの後にopenをfalseにします",
+      "hideImmediately()はclearTimeoutして同期的にopenをfalseにします",
+      "React.cloneElementでトリガーの子要素にref、aria-describedby、イベントハンドラを注入します",
+      "aria-describedbyはopenがtrueの時だけtooltipIdを設定、closedの時はundefinedにします",
+      "createPortal(content, document.body)でコンポーネントツリー外にツールチップを描画します",
+      "useEffectのクリーンアップでアンマウント時にタイムアウトをクリアすることを忘れずに"
+    ]
+  },
+  "dependencies": {}
+}

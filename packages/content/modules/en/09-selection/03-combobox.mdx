@@ -1,0 +1,542 @@
+---
+title: "Building a Combobox Component"
+description: "Build an accessible Combobox/Autocomplete with input filtering, aria-autocomplete, aria-expanded, and highlighted match display."
+order: 3
+isFree: false
+---
+
+# Building a Combobox Component
+
+A **Combobox** (also called Autocomplete) combines a text input with a popup listbox, allowing users to filter options by typing. It is one of the most complex ARIA patterns because it must coordinate input focus, live filtering, keyboard navigation within the popup, and screen reader announcements — all simultaneously.
+
+## How Combobox Differs from Select
+
+| Aspect | Select | Combobox |
+|--------|--------|----------|
+| Trigger element | Button | Text input |
+| User can type | No | Yes — filters options |
+| `aria-autocomplete` | Not used | `"list"`, `"inline"`, or `"both"` |
+| Filtering | No | Yes — options reduce as user types |
+| Clear value | Select a "None" option | Delete input text |
+| Free-form input | No | Depends on implementation |
+
+## ARIA Roles and Attributes
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="combobox"` | Text input | Identifies as a combobox |
+| `aria-haspopup="listbox"` | Text input | Announces a listbox will appear |
+| `aria-expanded` | Text input | Whether the popup is open |
+| `aria-controls` | Text input | Points to the popup listbox's `id` |
+| `aria-activedescendant` | Text input | Points to the highlighted option's `id` |
+| `aria-autocomplete` | Text input | Describes the autocomplete behavior |
+| `role="listbox"` | Popup container | Groups the filtered options |
+| `role="option"` | Each option | Identifies as a selectable option |
+
+### aria-autocomplete Values
+
+| Value | Meaning |
+|-------|---------|
+| `"list"` | A popup list of suggestions appears, user's input is not completed |
+| `"inline"` | Text is auto-completed inline in the input, no popup |
+| `"both"` | A popup appears AND text is completed inline |
+| `"none"` | No autocomplete behavior |
+
+For most implementations, `"list"` is the correct value — the input filters a popup list of suggestions.
+
+```tsx
+<input
+  role="combobox"
+  aria-haspopup="listbox"
+  aria-expanded={isOpen}
+  aria-controls="suggestions-listbox"
+  aria-activedescendant={highlightedOptionId}
+  aria-autocomplete="list"
+  value={inputValue}
+  onChange={(e) => setInputValue(e.target.value)}
+/>
+<ul role="listbox" id="suggestions-listbox">
+  {filteredOptions.map((opt) => (
+    <li role="option" id={opt.id} aria-selected={opt.isSelected}>
+      {opt.label}
+    </li>
+  ))}
+</ul>
+```
+
+## Keyboard Interactions
+
+| Key | Popup Closed | Popup Open |
+|-----|-------------|------------|
+| Typing | Opens popup, filters options | Filters options |
+| `ArrowDown` | Opens popup, highlights first option | Highlights next option |
+| `ArrowUp` | Opens popup, highlights last option | Highlights previous option |
+| `Home` | Cursor to start of input | Highlights first option |
+| `End` | Cursor to end of input | Highlights last option |
+| `Enter` | — | Selects highlighted option, closes popup |
+| `Escape` | Clears input | Closes popup (keeps input value) |
+| `Tab` | — | Closes popup (optionally selects highlighted) |
+
+<Callout type="tip">
+Unlike Select, DOM focus **always** stays on the text input. The user is typing while simultaneously navigating the popup with arrow keys. This is why `aria-activedescendant` is essential — it decouples visual highlighting from DOM focus.
+</Callout>
+
+## Component API Design
+
+```tsx
+interface ComboboxProps {
+  value?: string;
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+  placeholder?: string;
+}
+
+interface ComboboxOptionProps {
+  value: string;
+  disabled?: boolean;
+}
+```
+
+Compound components:
+
+- **`Combobox.Root`** — Manages open state, input value, selected value, and highlighted index.
+- **`Combobox.Input`** — The text input with `role="combobox"`.
+- **`Combobox.Content`** — The popup listbox.
+- **`Combobox.Option`** — Individual filterable options.
+- **`Combobox.Empty`** — Shown when no options match the filter.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface ComboboxContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  inputValue: string;
+  setInputValue: (value: string) => void;
+  selectedValue: string;
+  selectValue: (value: string, label: string) => void;
+  highlightedIndex: number;
+  setHighlightedIndex: (index: number) => void;
+  filteredOptions: { value: string; label: string; id: string }[];
+  registerOption: (value: string, label: string, id: string) => void;
+  listboxId: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+}
+
+const ComboboxContext = React.createContext<ComboboxContextValue | null>(null);
+
+function useComboboxContext() {
+  const ctx = React.useContext(ComboboxContext);
+  if (!ctx) throw new Error("Combobox components must be used within Combobox.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  value: controlledValue,
+  defaultValue = "",
+  onValueChange,
+  children,
+}: ComboboxProps & { children: React.ReactNode }) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [inputValue, setInputValue] = React.useState("");
+  const [selectedValue, setSelectedValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  const allOptions = React.useRef<{ value: string; label: string; id: string }[]>([]);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const listboxId = `combobox-listbox-${React.useId()}`;
+
+  const current = controlledValue ?? selectedValue;
+
+  const filteredOptions = React.useMemo(() => {
+    if (!inputValue) return allOptions.current;
+    return allOptions.current.filter((opt) =>
+      opt.label.toLowerCase().includes(inputValue.toLowerCase()),
+    );
+  }, [inputValue]);
+
+  const selectValue = React.useCallback(
+    (val: string, label: string) => {
+      if (controlledValue === undefined) setSelectedValue(val);
+      setInputValue(label);
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+      onValueChange?.(val);
+      inputRef.current?.focus();
+    },
+    [controlledValue, onValueChange],
+  );
+
+  const registerOption = React.useCallback(
+    (value: string, label: string, id: string) => {
+      const exists = allOptions.current.find((o) => o.value === value);
+      if (!exists) {
+        allOptions.current.push({ value, label, id });
+      }
+    },
+    [],
+  );
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      inputValue,
+      setInputValue,
+      selectedValue: current,
+      selectValue,
+      highlightedIndex,
+      setHighlightedIndex,
+      filteredOptions,
+      registerOption,
+      listboxId,
+      inputRef,
+    }),
+    [
+      isOpen, inputValue, current, selectValue,
+      highlightedIndex, filteredOptions, registerOption, listboxId,
+    ],
+  );
+
+  return <ComboboxContext value={ctx}>{children}</ComboboxContext>;
+}
+
+// --- Input ---
+
+function Input(props: React.ComponentPropsWithoutRef<"input">) {
+  const {
+    isOpen,
+    setIsOpen,
+    inputValue,
+    setInputValue,
+    highlightedIndex,
+    setHighlightedIndex,
+    filteredOptions,
+    selectValue,
+    listboxId,
+    inputRef,
+  } = useComboboxContext();
+
+  const activeDescendant =
+    highlightedIndex >= 0
+      ? filteredOptions[highlightedIndex]?.id
+      : undefined;
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+    setIsOpen(true);
+    setHighlightedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        if (!isOpen) {
+          setIsOpen(true);
+          setHighlightedIndex(0);
+        } else {
+          setHighlightedIndex(
+            Math.min(highlightedIndex + 1, filteredOptions.length - 1),
+          );
+        }
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        if (!isOpen) {
+          setIsOpen(true);
+          setHighlightedIndex(filteredOptions.length - 1);
+        } else {
+          setHighlightedIndex(Math.max(highlightedIndex - 1, 0));
+        }
+        break;
+      }
+      case "Home": {
+        if (isOpen) {
+          e.preventDefault();
+          setHighlightedIndex(0);
+        }
+        break;
+      }
+      case "End": {
+        if (isOpen) {
+          e.preventDefault();
+          setHighlightedIndex(filteredOptions.length - 1);
+        }
+        break;
+      }
+      case "Enter": {
+        e.preventDefault();
+        if (isOpen && highlightedIndex >= 0) {
+          const opt = filteredOptions[highlightedIndex];
+          selectValue(opt.value, opt.label);
+        }
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        if (isOpen) {
+          setIsOpen(false);
+        } else {
+          setInputValue("");
+        }
+        break;
+      }
+    }
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      role="combobox"
+      type="text"
+      aria-haspopup="listbox"
+      aria-expanded={isOpen}
+      aria-controls={listboxId}
+      aria-activedescendant={activeDescendant}
+      aria-autocomplete="list"
+      value={inputValue}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        if (inputValue) setIsOpen(true);
+      }}
+      {...props}
+    />
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const { isOpen, listboxId, highlightedIndex, filteredOptions } =
+    useComboboxContext();
+
+  // Scroll highlighted option into view
+  React.useEffect(() => {
+    if (!isOpen || highlightedIndex < 0) return;
+    const optionId = filteredOptions[highlightedIndex]?.id;
+    if (optionId) {
+      document.getElementById(optionId)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [isOpen, highlightedIndex, filteredOptions]);
+
+  if (!isOpen) return null;
+
+  return (
+    <ul role="listbox" id={listboxId} {...props}>
+      {children}
+    </ul>
+  );
+}
+
+// --- Option ---
+
+function Option({
+  value,
+  children,
+  disabled = false,
+  ...props
+}: ComboboxOptionProps & React.ComponentPropsWithoutRef<"li">) {
+  const {
+    selectedValue,
+    selectValue,
+    highlightedIndex,
+    setHighlightedIndex,
+    filteredOptions,
+    registerOption,
+    inputValue,
+  } = useComboboxContext();
+
+  const optionId = `combobox-option-${React.useId()}`;
+  const label = typeof children === "string" ? children : value;
+
+  React.useEffect(() => {
+    registerOption(value, label, optionId);
+  }, [value, label, optionId, registerOption]);
+
+  // Check if this option passes the filter
+  if (inputValue && !label.toLowerCase().includes(inputValue.toLowerCase())) {
+    return null;
+  }
+
+  const index = filteredOptions.findIndex((o) => o.value === value);
+  const isSelected = selectedValue === value;
+  const isHighlighted = highlightedIndex === index;
+
+  return (
+    <li
+      role="option"
+      id={optionId}
+      aria-selected={isSelected}
+      aria-disabled={disabled || undefined}
+      data-highlighted={isHighlighted || undefined}
+      data-state={isSelected ? "selected" : undefined}
+      onClick={() => {
+        if (!disabled) selectValue(value, label);
+      }}
+      onPointerMove={() => {
+        if (!disabled) setHighlightedIndex(index);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+// --- Empty ---
+
+function Empty({ children }: { children: React.ReactNode }) {
+  const { filteredOptions, isOpen } = useComboboxContext();
+  if (!isOpen || filteredOptions.length > 0) return null;
+  return <li role="presentation">{children}</li>;
+}
+
+export const Combobox = { Root, Input, Content, Option, Empty };
+```
+
+## Highlighting Matching Text
+
+One of the most satisfying UX details in a Combobox is bolding the portion of each option that matches the user's input. This gives immediate visual feedback that filtering is working:
+
+```tsx
+function HighlightMatch({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}) {
+  if (!query) return <>{text}</>;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const startIndex = lowerText.indexOf(lowerQuery);
+
+  if (startIndex === -1) return <>{text}</>;
+
+  const before = text.slice(0, startIndex);
+  const match = text.slice(startIndex, startIndex + query.length);
+  const after = text.slice(startIndex + query.length);
+
+  return (
+    <>
+      {before}
+      <mark>{match}</mark>
+      {after}
+    </>
+  );
+}
+```
+
+Usage inside an option:
+
+```tsx
+<Combobox.Option value="javascript">
+  <HighlightMatch text="JavaScript" query={inputValue} />
+</Combobox.Option>
+```
+
+<Callout type="info">
+The `<mark>` element is semantically correct for highlighting search matches. Screen readers will announce "highlight" before and after the marked text, which aids comprehension.
+</Callout>
+
+## Live Region Announcements
+
+When the number of filtered results changes, screen reader users need to know. Add an `aria-live` region that announces the count:
+
+```tsx
+function ResultsAnnouncement({ count }: { count: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="sr-only"
+    >
+      {count === 0
+        ? "No results found"
+        : `${count} result${count === 1 ? "" : "s"} available`}
+    </div>
+  );
+}
+```
+
+This pattern is essential for accessibility — without it, screen reader users have no idea whether their typing produced any matches.
+
+## Filtering Strategies
+
+| Strategy | Description | When to Use |
+|----------|-------------|-------------|
+| `startsWith` | Match from beginning of string | Short lists, predictable labels |
+| `includes` | Match anywhere in string | General purpose, most common |
+| `fuzzy` | Match non-contiguous characters | Large datasets, IDE-style search |
+
+```tsx
+// startsWith
+options.filter((o) => o.label.toLowerCase().startsWith(query));
+
+// includes
+options.filter((o) => o.label.toLowerCase().includes(query));
+
+// fuzzy (simple approach)
+function fuzzyMatch(text: string, query: string): boolean {
+  let queryIdx = 0;
+  for (let i = 0; i < text.length && queryIdx < query.length; i++) {
+    if (text[i].toLowerCase() === query[queryIdx].toLowerCase()) {
+      queryIdx++;
+    }
+  }
+  return queryIdx === query.length;
+}
+```
+
+<Callout type="warning">
+For large datasets (1000+ options), consider debouncing the filter operation or virtualizing the option list to avoid janky input. `useDeferredValue` is a good tool for this — it lets React prioritize keeping the input responsive while deferring the filtered list re-render.
+</Callout>
+
+## Handling Free-form Input
+
+Some Combobox implementations allow users to submit a value that does not match any option. To support this, check whether the input matches an option when the user presses Enter or blurs the input:
+
+```tsx
+const handleBlur = () => {
+  const match = options.find(
+    (o) => o.label.toLowerCase() === inputValue.toLowerCase(),
+  );
+  if (match) {
+    selectValue(match.value, match.label);
+  } else if (allowCustomValues) {
+    onValueChange?.(inputValue);
+  } else {
+    // Reset to last valid selection
+    setInputValue(selectedLabel);
+  }
+};
+```
+
+## Key Takeaways
+
+1. **Combobox = text input (`combobox`) + popup (`listbox`).** DOM focus never leaves the input.
+2. **`aria-autocomplete="list"`** tells screen readers that a suggestion list will appear as the user types.
+3. **`aria-activedescendant`** on the input communicates the highlighted option without moving focus.
+4. **Filtering** happens on every keystroke — use `includes` for general-purpose matching.
+5. **Highlight matching text** with `<mark>` for visual feedback.
+6. **Live region announcements** (`aria-live="polite"`) inform screen reader users of result count changes.
+7. **Escape** closes the popup when open, clears input when closed — two-phase behavior.
+
+## Try It Yourself
+
+<Exercise id="combobox-basic" />

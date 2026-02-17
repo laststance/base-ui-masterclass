@@ -1,0 +1,328 @@
+---
+title: "Floating UI Positioning Fundamentals"
+description: "Learn how overlay positioning works with anchor elements, placement strategies, flip/shift middleware, and virtual elements."
+order: 1
+isFree: false
+---
+
+# Floating UI Positioning Fundamentals
+
+Every tooltip, popover, dropdown menu, and context menu shares a common challenge: **positioning a floating element relative to an anchor**. Before building any overlay component, you need to understand the math and browser APIs that make reliable positioning possible.
+
+## The Positioning Problem
+
+Placing an element next to another sounds trivial until you consider:
+
+1. **Viewport boundaries** — The tooltip might overflow off-screen.
+2. **Scroll containers** — The anchor might be inside a scrollable div.
+3. **Dynamic content** — The floating element's size can change after it mounts.
+4. **Responsive layouts** — The anchor may move when the window resizes.
+
+Naively setting `position: absolute` with calculated `top`/`left` values breaks under all of these conditions. This is why libraries like **Floating UI** (the successor to Popper.js) exist.
+
+## Core Concepts
+
+### Anchor and Floating Elements
+
+Every positioning calculation involves two elements:
+
+| Element | Role | Example |
+|---------|------|---------|
+| **Anchor** (reference) | The element the overlay attaches to | A button, a link, a text selection |
+| **Floating** | The overlay itself | Tooltip, popover, dropdown |
+
+The floating element is positioned relative to the anchor using coordinates calculated from their bounding rectangles.
+
+### Placement
+
+Placement defines **where** the floating element appears relative to the anchor. Floating UI supports 12 placements:
+
+```
+      top-start     top     top-end
+         ┌───────────────────────┐
+         │                       │
+left-start│       ANCHOR         │right-start
+left      │                      │right
+left-end  │                      │right-end
+         │                       │
+         └───────────────────────┘
+   bottom-start   bottom   bottom-end
+```
+
+The default placement is `"bottom"`, meaning the floating element appears below the anchor, centered horizontally.
+
+```tsx
+import { computePosition } from "@floating-ui/dom";
+
+const anchor = document.getElementById("my-button")!;
+const floating = document.getElementById("my-tooltip")!;
+
+const { x, y } = await computePosition(anchor, floating, {
+  placement: "top", // appear above the anchor
+});
+
+Object.assign(floating.style, {
+  left: `${x}px`,
+  top: `${y}px`,
+});
+```
+
+### The Coordinate System
+
+`computePosition` returns `x` and `y` values that represent pixel offsets from the **offset parent** of the floating element. The floating element must use `position: absolute` or `position: fixed` for these coordinates to work correctly.
+
+<Callout type="tip">
+When rendering into a portal (which you should for most overlays), the floating element's offset parent is typically the `document.body`. This simplifies coordinate calculations because there are no intermediate positioned ancestors to account for.
+</Callout>
+
+## Middleware
+
+Raw placement coordinates are just the starting point. **Middleware** functions transform the position to handle edge cases. They run in sequence, each receiving the current coordinates and returning modified ones.
+
+### `offset` — Add Spacing
+
+The `offset` middleware adds distance between the anchor and the floating element. Without it, the floating element sits flush against the anchor.
+
+```tsx
+import { computePosition, offset } from "@floating-ui/dom";
+
+const { x, y } = await computePosition(anchor, floating, {
+  placement: "top",
+  middleware: [offset(8)], // 8px gap between anchor and tooltip
+});
+```
+
+You can also pass an object for asymmetric offsets:
+
+```tsx
+offset({
+  mainAxis: 8,   // distance along the placement axis
+  crossAxis: 0,  // distance perpendicular to placement
+  alignmentAxis: -4, // shift along alignment (start/end)
+})
+```
+
+### `flip` — Avoid Viewport Overflow
+
+When the floating element would overflow the viewport at the specified placement, `flip` switches to the opposite side.
+
+```tsx
+import { flip } from "@floating-ui/dom";
+
+// If "top" would overflow, automatically use "bottom"
+middleware: [offset(8), flip()]
+```
+
+The `flip` middleware checks available space on the opposite side before flipping. You can configure a `fallbackPlacements` array for more control:
+
+```tsx
+flip({
+  fallbackPlacements: ["top", "right", "left"], // try these in order
+})
+```
+
+### `shift` — Slide Along the Axis
+
+While `flip` changes the side (top to bottom), `shift` slides the floating element along the cross axis to keep it in view.
+
+```tsx
+import { shift } from "@floating-ui/dom";
+
+// Slide horizontally to stay within the viewport
+middleware: [offset(8), flip(), shift({ padding: 8 })]
+```
+
+The `padding` option creates a buffer zone from the viewport edges.
+
+<Callout type="info">
+Middleware order matters. The recommended order is `offset` first (so flip/shift work with the offset applied), then `flip` (to choose the best side), then `shift` (to fine-tune within that side).
+</Callout>
+
+### `arrow` — Position an Arrow Element
+
+Many tooltips and popovers include a small arrow or caret pointing at the anchor. The `arrow` middleware calculates where to position this element.
+
+```tsx
+import { arrow } from "@floating-ui/dom";
+
+const arrowEl = document.getElementById("arrow")!;
+
+const { x, y, middlewareData } = await computePosition(anchor, floating, {
+  placement: "top",
+  middleware: [offset(8), flip(), shift(), arrow({ element: arrowEl })],
+});
+
+// Position the arrow
+const { x: arrowX, y: arrowY } = middlewareData.arrow ?? {};
+Object.assign(arrowEl.style, {
+  left: arrowX != null ? `${arrowX}px` : "",
+  top: arrowY != null ? `${arrowY}px` : "",
+});
+```
+
+### `size` — Constrain Dimensions
+
+The `size` middleware lets you resize the floating element based on available space. This is essential for dropdown menus that should not extend beyond the viewport.
+
+```tsx
+import { size } from "@floating-ui/dom";
+
+middleware: [
+  size({
+    apply({ availableHeight }) {
+      Object.assign(floating.style, {
+        maxHeight: `${availableHeight}px`,
+      });
+    },
+  }),
+]
+```
+
+## Using Floating UI with React
+
+Floating UI provides a React package with hooks that handle refs, auto-updates, and cleanup:
+
+```tsx
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+} from "@floating-ui/react";
+
+function TooltipExample() {
+  const { refs, floatingStyles } = useFloating({
+    placement: "top",
+    middleware: [offset(8), flip(), shift()],
+    whileElementsMounted: autoUpdate, // reposition on scroll/resize
+  });
+
+  return (
+    <>
+      <button ref={refs.setReference}>Hover me</button>
+      <div ref={refs.setFloating} style={floatingStyles}>
+        Tooltip content
+      </div>
+    </>
+  );
+}
+```
+
+The `autoUpdate` function listens for scroll events, resize events, and DOM mutations to keep the floating element correctly positioned.
+
+<Callout type="warning">
+Always pass `whileElementsMounted: autoUpdate` for interactive overlays. Without it, the floating element stays at its initial position even when the user scrolls or resizes the window.
+</Callout>
+
+## Virtual Elements
+
+Sometimes the anchor is not a DOM element. For example, a context menu appears at the mouse cursor position. Floating UI supports **virtual elements** — objects with a `getBoundingClientRect` method:
+
+```tsx
+import { useFloating } from "@floating-ui/react";
+
+function ContextMenu() {
+  const { refs, floatingStyles } = useFloating({
+    placement: "right-start",
+    middleware: [offset(4), flip(), shift()],
+  });
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Create a virtual element at the cursor position
+    refs.setReference({
+      getBoundingClientRect() {
+        return {
+          x: e.clientX,
+          y: e.clientY,
+          width: 0,
+          height: 0,
+          top: e.clientY,
+          right: e.clientX,
+          bottom: e.clientY,
+          left: e.clientX,
+        };
+      },
+    });
+  };
+
+  return (
+    <div onContextMenu={handleContextMenu}>
+      Right-click anywhere
+      <div ref={refs.setFloating} style={floatingStyles}>
+        Context menu items...
+      </div>
+    </div>
+  );
+}
+```
+
+Virtual elements are also useful for:
+- **Text selection popovers** — anchor to the selection's bounding rect via `window.getSelection().getRangeAt(0).getBoundingClientRect()`
+- **Drag-and-drop feedback** — anchor to the current drag position
+- **Canvas-based UIs** — anchor to coordinates in a `<canvas>` element
+
+## Portal Rendering
+
+Overlay components should render into a **portal** — a DOM node outside the normal component tree. This prevents:
+
+1. **CSS overflow clipping** — A parent with `overflow: hidden` would clip the overlay.
+2. **Stacking context issues** — A parent with `z-index` could trap the overlay below other elements.
+3. **Transform interference** — CSS `transform` on an ancestor creates a new containing block, breaking `position: fixed`.
+
+React's `createPortal` renders children into a different DOM node while preserving React context:
+
+```tsx
+import { createPortal } from "react-dom";
+
+function Overlay({ children }: { children: React.ReactNode }) {
+  return createPortal(children, document.body);
+}
+```
+
+<Callout type="tip">
+Even though portal-rendered elements are in a different DOM location, React events still bubble through the React tree (not the DOM tree). This means click handlers on parent React components still work correctly.
+</Callout>
+
+## Combining It All: The Positioning Pattern
+
+Every overlay component in this course follows the same positioning pattern:
+
+1. **`useFloating`** — Compute coordinates with middleware.
+2. **Portal** — Render the floating element outside the DOM hierarchy.
+3. **`autoUpdate`** — Keep position in sync with scroll/resize.
+4. **Conditional rendering** — Only mount the floating element when the overlay is open.
+
+```tsx
+function PositionedOverlay({ open, anchor, children }) {
+  const { refs, floatingStyles } = useFloating({
+    placement: "bottom",
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  // Sync external anchor ref
+  React.useEffect(() => {
+    refs.setReference(anchor);
+  }, [anchor, refs]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div ref={refs.setFloating} style={floatingStyles}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+```
+
+## Key Takeaways
+
+1. **`computePosition`** calculates `x`/`y` coordinates for placing a floating element relative to an anchor.
+2. **Middleware** transforms coordinates in sequence: `offset` adds spacing, `flip` avoids overflow by switching sides, `shift` slides along the cross axis.
+3. **`autoUpdate`** keeps the position accurate during scroll, resize, and layout changes.
+4. **Virtual elements** let you anchor to arbitrary positions like mouse cursors or text selections.
+5. **Portals** prevent CSS clipping and stacking context issues by rendering outside the component hierarchy.
+6. **Middleware order matters**: always apply `offset` before `flip` before `shift`.

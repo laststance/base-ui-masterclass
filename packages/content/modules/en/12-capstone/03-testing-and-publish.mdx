@@ -1,0 +1,389 @@
+---
+title: "Testing Strategy and Publishing"
+description: "Learn the full testing strategy for a component library — unit tests with Testing Library, a11y tests with axe-core, visual regression tests — plus npm publishing with semantic versioning, changesets, and CI/CD."
+order: 3
+isFree: false
+---
+
+# Testing Strategy and Publishing
+
+This final lesson covers two critical topics: **testing your component library thoroughly** and **publishing it to npm with a professional workflow**. A well-tested library builds trust with consumers; a well-automated publishing pipeline ensures they always get reliable updates.
+
+## Testing Pyramid for Component Libraries
+
+Component libraries have a specific testing profile that differs from application testing:
+
+| Layer | Tool | What It Tests | Coverage |
+|-------|------|---------------|----------|
+| **Unit tests** | Vitest + Testing Library | Component behavior, ARIA attributes, keyboard interaction | ~70% |
+| **Accessibility tests** | axe-core + Testing Library | WCAG compliance, missing labels, contrast | ~15% |
+| **Visual tests** | Playwright screenshots | Pixel-level rendering, layout regressions | ~10% |
+| **Integration tests** | Storybook interaction tests | Multi-component workflows, real DOM | ~5% |
+
+## Unit Tests with Testing Library
+
+Testing Library's philosophy — test how users interact with components, not implementation details — aligns perfectly with headless component testing. We test the public API: rendered output, ARIA attributes, keyboard events, and state changes.
+
+### Testing ARIA Attributes
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { Slider } from "./slider";
+
+test("thumb has role='slider' with correct ARIA attributes", () => {
+  render(
+    <Slider.Root defaultValue={50} min={0} max={100}>
+      <Slider.Track>
+        <Slider.Range />
+      </Slider.Track>
+      <Slider.Thumb aria-label="Volume" />
+    </Slider.Root>,
+  );
+
+  const thumb = screen.getByRole("slider");
+  expect(thumb).toHaveAttribute("aria-valuenow", "50");
+  expect(thumb).toHaveAttribute("aria-valuemin", "0");
+  expect(thumb).toHaveAttribute("aria-valuemax", "100");
+  expect(thumb).toHaveAttribute("aria-label", "Volume");
+});
+```
+
+### Testing Keyboard Interaction
+
+```tsx
+import { render, screen, fireEvent } from "@testing-library/react";
+import { NumberField } from "./number-field";
+
+test("ArrowUp increments value by step", () => {
+  const onValueChange = vi.fn();
+
+  render(
+    <NumberField.Root defaultValue={5} step={1} onValueChange={onValueChange}>
+      <NumberField.Input aria-label="Quantity" />
+    </NumberField.Root>,
+  );
+
+  const input = screen.getByRole("spinbutton");
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  expect(onValueChange).toHaveBeenCalledWith(6);
+});
+
+test("value does not exceed max", () => {
+  const onValueChange = vi.fn();
+
+  render(
+    <NumberField.Root defaultValue={99} max={100} step={5} onValueChange={onValueChange}>
+      <NumberField.Input aria-label="Quantity" />
+    </NumberField.Root>,
+  );
+
+  const input = screen.getByRole("spinbutton");
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  expect(onValueChange).toHaveBeenCalledWith(100); // Clamped to max
+});
+```
+
+### Testing State Changes
+
+```tsx
+test("clicking increment button updates displayed value", () => {
+  render(
+    <NumberField.Root defaultValue={0}>
+      <NumberField.Decrement>-</NumberField.Decrement>
+      <NumberField.Input aria-label="Count" />
+      <NumberField.Increment>+</NumberField.Increment>
+    </NumberField.Root>,
+  );
+
+  const input = screen.getByRole("spinbutton");
+  const incrementBtn = screen.getByLabelText("Increment");
+
+  expect(input).toHaveAttribute("aria-valuenow", "0");
+  fireEvent.click(incrementBtn);
+  expect(input).toHaveAttribute("aria-valuenow", "1");
+});
+```
+
+## Accessibility Tests with axe-core
+
+[axe-core](https://github.com/dequelabs/axe-core) is the leading automated accessibility testing engine. Integrate it with your test suite using `vitest-axe` or `jest-axe`:
+
+```bash
+pnpm add -D vitest-axe
+```
+
+```tsx
+import { render } from "@testing-library/react";
+import { axe, toHaveNoViolations } from "vitest-axe";
+
+expect.extend(toHaveNoViolations);
+
+test("Slider has no accessibility violations", async () => {
+  const { container } = render(
+    <Slider.Root defaultValue={50} min={0} max={100}>
+      <Slider.Track>
+        <Slider.Range />
+      </Slider.Track>
+      <Slider.Thumb aria-label="Volume" />
+    </Slider.Root>,
+  );
+
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
+
+<Callout type="info">
+Run axe-core tests for every component in your library. Create a shared test utility that renders each component in its common configurations and asserts zero violations.
+</Callout>
+
+### Shared A11y Test Utility
+
+```tsx
+// test-utils/a11y.ts
+import { render, RenderResult } from "@testing-library/react";
+import { axe, toHaveNoViolations } from "vitest-axe";
+
+expect.extend(toHaveNoViolations);
+
+/**
+ * Renders a component and asserts it has no axe-core violations.
+ * @param ui - The React element to test.
+ * @returns The axe results for further inspection if needed.
+ * @example
+ * await assertNoA11yViolations(<Button>Click me</Button>);
+ */
+export async function assertNoA11yViolations(ui: React.ReactElement) {
+  const { container } = render(ui);
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+  return results;
+}
+```
+
+## Visual Regression Tests
+
+Visual tests complement unit tests by catching rendering issues that behavioral tests cannot detect (spacing, alignment, overflow, font rendering):
+
+```tsx
+// tests/visual/components.spec.ts
+import { test, expect } from "@playwright/test";
+
+const components = [
+  { name: "slider-horizontal", id: "advanced-slider--horizontal" },
+  { name: "slider-disabled", id: "advanced-slider--disabled" },
+  { name: "number-field-default", id: "advanced-numberfield--default" },
+  { name: "toast-success", id: "advanced-toast--success" },
+];
+
+for (const { name, id } of components) {
+  test(`visual: ${name}`, async ({ page }) => {
+    await page.goto(`http://localhost:6006/iframe.html?id=${id}`);
+    await page.waitForLoadState("networkidle");
+    await expect(page).toHaveScreenshot(`${name}.png`);
+  });
+}
+```
+
+Run with `pnpm playwright test --update-snapshots` to create baselines, then subsequent runs compare against them.
+
+## Test Scripts
+
+```json
+{
+  "scripts": {
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "test:a11y": "vitest --grep 'accessibility'",
+    "test:visual": "playwright test",
+    "test:all": "pnpm test && pnpm test:visual"
+  }
+}
+```
+
+## Publishing to npm
+
+### Semantic Versioning
+
+npm uses [semver](https://semver.org/) for version numbers: `MAJOR.MINOR.PATCH`.
+
+| Increment | When | Example |
+|-----------|------|---------|
+| **MAJOR** | Breaking API change | Renaming a prop, removing a component | `1.0.0` to `2.0.0` |
+| **MINOR** | New feature (backward-compatible) | Adding a new component | `1.0.0` to `1.1.0` |
+| **PATCH** | Bug fix (backward-compatible) | Fixing a keyboard handler | `1.0.0` to `1.0.1` |
+
+<Callout type="warning">
+A headless component library's API surface includes: component names, prop names, prop types, data attributes, CSS custom properties, and ARIA attribute behavior. A change to any of these that could break consumer code is a **major** version bump.
+</Callout>
+
+### Changesets for Version Management
+
+[Changesets](https://github.com/changesets/changesets) automate version bumping and changelog generation. Each change gets a "changeset" — a Markdown file describing what changed and the semver impact:
+
+```bash
+pnpm add -D @changesets/cli
+pnpm changeset init
+```
+
+When you make a change, create a changeset:
+
+```bash
+pnpm changeset
+```
+
+This prompts you for the package, version bump type, and a description. It creates a file in `.changeset/`:
+
+```md
+---
+"@mylib/ui": minor
+---
+
+Added Slider component with full ARIA slider pattern, keyboard navigation, and CSS custom property support.
+```
+
+When ready to release:
+
+```bash
+pnpm changeset version   # Bumps versions based on changesets
+pnpm changeset publish   # Publishes to npm
+```
+
+### Generated CHANGELOG
+
+Changesets automatically generate a `CHANGELOG.md`:
+
+```md
+# @mylib/ui
+
+## 1.3.0
+
+### Minor Changes
+
+- Added Slider component with full ARIA slider pattern, keyboard navigation, and CSS custom property support.
+- Added NumberField component with spinbutton role and increment/decrement buttons.
+
+### Patch Changes
+
+- Fixed Tabs component not forwarding aria-orientation to tablist.
+```
+
+## CI/CD Pipeline
+
+Automate testing and publishing with GitHub Actions:
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  publish:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Create Release Pull Request or Publish
+        uses: changesets/action@v1
+        with:
+          publish: pnpm changeset publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+The `changesets/action` GitHub Action does two things:
+
+1. **When changesets exist**: Opens a "Version Packages" PR that bumps versions and updates changelogs.
+2. **When that PR is merged**: Publishes the new versions to npm.
+
+## Pre-Release Workflow
+
+For testing unreleased versions, changesets support pre-release channels:
+
+```bash
+pnpm changeset pre enter beta    # Enter pre-release mode
+pnpm changeset version           # Produces 1.3.0-beta.0
+pnpm changeset publish           # Publishes with beta tag
+pnpm changeset pre exit          # Exit pre-release mode
+```
+
+Consumers can install the beta:
+
+```bash
+pnpm add @mylib/ui@beta
+```
+
+## Provenance and Security
+
+npm supports [provenance statements](https://docs.npmjs.com/generating-provenance-statements) that cryptographically link a published package to its source code and build process:
+
+```yaml
+- run: pnpm changeset publish --provenance
+  env:
+    NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+This gives consumers verifiable proof that the package was built from a specific commit in your repository.
+
+## Pre-Publish Checklist
+
+Before your first publish, verify:
+
+- [ ] `package.json` has correct `name`, `version`, `exports`, `peerDependencies`
+- [ ] `sideEffects: false` is set
+- [ ] `files` field includes only `dist/` (avoids shipping source/test files)
+- [ ] `pnpm build` produces all expected output files
+- [ ] TypeScript declarations resolve correctly
+- [ ] All tests pass: `pnpm test && pnpm test:visual`
+- [ ] `pnpm publint` reports no issues
+- [ ] `README.md` has installation and basic usage instructions
+- [ ] `LICENSE` file exists
+
+```json
+{
+  "files": ["dist", "README.md", "LICENSE"]
+}
+```
+
+## Key Takeaways
+
+1. **Unit tests** cover behavior, ARIA attributes, and keyboard interaction using Testing Library.
+2. **axe-core** catches automated accessibility violations — run it on every component.
+3. **Visual regression tests** with Playwright catch rendering issues that behavioral tests miss.
+4. **Semantic versioning** communicates the impact of each change to consumers.
+5. **Changesets** automate version bumping, changelog generation, and the entire release workflow.
+6. **CI/CD with GitHub Actions** ensures every change is tested before it reaches npm.
+7. **Provenance statements** give consumers cryptographic proof of your package's build origin.

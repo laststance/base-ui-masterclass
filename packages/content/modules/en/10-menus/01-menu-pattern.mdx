@@ -1,0 +1,260 @@
+---
+title: "The ARIA Menu Pattern"
+description: "Master the WAI-ARIA menu pattern including menuitem, menuitemcheckbox, menuitemradio roles, roving tabindex in menus, and typeahead search."
+order: 1
+isFree: false
+---
+
+# The ARIA Menu Pattern
+
+The **menu** pattern is one of the most nuanced ARIA patterns. It models the behavior of desktop application menus — the kind you see in the File/Edit/View menu bar of any native application. Understanding this pattern deeply is essential before building Menu and ContextMenu components, because menus have strict keyboard behavior that differs significantly from other composite widgets.
+
+## When to Use `role="menu"` (and When Not To)
+
+This is the most common mistake developers make with menus:
+
+| Use Case | Correct Role | Wrong Role |
+|----------|-------------|------------|
+| Application-style dropdown with actions | `menu` / `menuitem` | — |
+| Navigation links | `nav` + `<a>` | `menu` / `menuitem` |
+| List of choices (select one) | `listbox` / `option` | `menu` / `menuitem` |
+| Toolbar buttons | `toolbar` + `button` | `menu` / `menuitem` |
+
+<Callout type="warning">
+`role="menu"` is NOT for navigation. A list of links to different pages should use `<nav>` with `<a>` elements, not a menu. Menus are for **actions** — things that happen when you "click" them, like "Copy", "Paste", "Delete", or "Save As".
+</Callout>
+
+The WAI-ARIA specification is explicit: a menu is a widget that offers a list of choices to the user, typically actions or functions. Navigation menus (site navbars) should NOT use `role="menu"`.
+
+## Menu Roles
+
+| Role | Purpose | Example |
+|------|---------|---------|
+| `menu` | Container for menu items | The dropdown panel |
+| `menubar` | Horizontal menu bar | File / Edit / View bar |
+| `menuitem` | An actionable menu item | "Copy", "Paste" |
+| `menuitemcheckbox` | A toggleable menu item | "Show Sidebar" (on/off) |
+| `menuitemradio` | A radio-style menu item | "Sort By: Name / Date / Size" |
+
+### Menu Item Roles in Detail
+
+**`menuitem`** — The most common role. Represents a command that performs an action when activated.
+
+```tsx
+<li role="menuitem" onClick={handleCopy}>Copy</li>
+```
+
+**`menuitemcheckbox`** — Represents a binary toggle. The `aria-checked` attribute communicates state.
+
+```tsx
+<li role="menuitemcheckbox" aria-checked={showSidebar} onClick={toggleSidebar}>
+  Show Sidebar
+</li>
+```
+
+**`menuitemradio`** — Represents one option in a mutually exclusive group. Grouped items should be wrapped in a `role="group"` container.
+
+```tsx
+<ul role="group" aria-label="Sort by">
+  <li role="menuitemradio" aria-checked={sortBy === "name"}>Name</li>
+  <li role="menuitemradio" aria-checked={sortBy === "date"}>Date</li>
+  <li role="menuitemradio" aria-checked={sortBy === "size"}>Size</li>
+</ul>
+```
+
+## ARIA Attributes for Menus
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="menu"` | Container | Identifies as a menu widget |
+| `aria-label` / `aria-labelledby` | Menu | Provides an accessible name |
+| `aria-orientation` | Menu | `"vertical"` (default) or `"horizontal"` |
+| `aria-checked` | `menuitemcheckbox` / `menuitemradio` | Communicates toggle state |
+| `aria-disabled` | Any menu item | Indicates item is not available |
+| `aria-haspopup` | Item with submenu | `"menu"` to indicate a submenu exists |
+| `aria-expanded` | Item with submenu | Whether the submenu is open |
+
+## Keyboard Navigation
+
+Menus use **roving tabindex** internally, but with specific rules that differ from tabs or toolbars:
+
+### Vertical Menu (Default)
+
+| Key | Action |
+|-----|--------|
+| `ArrowDown` | Move focus to next item |
+| `ArrowUp` | Move focus to previous item |
+| `Home` | Move focus to first item |
+| `End` | Move focus to last item |
+| `Enter` / `Space` | Activate the focused item |
+| `Escape` | Close the menu, return focus to trigger |
+| `ArrowRight` | Open submenu (if item has one) |
+| `ArrowLeft` | Close submenu, return to parent menu |
+
+### Horizontal Menubar
+
+| Key | Action |
+|-----|--------|
+| `ArrowRight` | Move focus to next top-level item |
+| `ArrowLeft` | Move focus to previous top-level item |
+| `ArrowDown` | Open dropdown, focus first item |
+| `ArrowUp` | Open dropdown, focus last item |
+| `Home` | Move focus to first item |
+| `End` | Move focus to last item |
+| `Escape` | Close dropdown |
+
+### Wrapping Behavior
+
+Unlike listbox, menu navigation **does wrap**. Pressing `ArrowDown` on the last item moves focus to the first item. This matches native OS menu behavior.
+
+## Roving Tabindex in Menus
+
+The implementation follows the same principle as tabs and toolbars — one item has `tabindex="0"`, all others have `tabindex="-1"`:
+
+```tsx
+function MenuList({ items }: { items: MenuItem[] }) {
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const itemRefs = React.useRef<(HTMLElement | null)[]>([]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const count = items.length;
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (activeIndex + 1) % count;
+        setActiveIndex(next);
+        itemRefs.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (activeIndex - 1 + count) % count;
+        setActiveIndex(prev);
+        itemRefs.current[prev]?.focus();
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setActiveIndex(0);
+        itemRefs.current[0]?.focus();
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        const last = count - 1;
+        setActiveIndex(last);
+        itemRefs.current[last]?.focus();
+        break;
+      }
+    }
+  };
+
+  return (
+    <ul role="menu" onKeyDown={handleKeyDown}>
+      {items.map((item, index) => (
+        <li
+          key={item.id}
+          role="menuitem"
+          tabIndex={index === activeIndex ? 0 : -1}
+          ref={(el) => { itemRefs.current[index] = el; }}
+          onFocus={() => setActiveIndex(index)}
+        >
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="info">
+Unlike Select/Combobox which use `aria-activedescendant`, menus move **actual DOM focus** to each menu item. This is because there is no text input to keep focus on — the menu itself receives focus when opened.
+</Callout>
+
+## Typeahead in Menus
+
+Menus support typeahead navigation, allowing users to jump to items by typing the first characters:
+
+```tsx
+const bufferRef = React.useRef("");
+const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+const handleTypeahead = (key: string) => {
+  if (key.length !== 1) return;
+
+  clearTimeout(timeoutRef.current);
+  bufferRef.current += key.toLowerCase();
+
+  const matchIndex = items.findIndex((item) =>
+    item.label.toLowerCase().startsWith(bufferRef.current),
+  );
+
+  if (matchIndex !== -1) {
+    setActiveIndex(matchIndex);
+    itemRefs.current[matchIndex]?.focus();
+  }
+
+  timeoutRef.current = setTimeout(() => {
+    bufferRef.current = "";
+  }, 500);
+};
+```
+
+Add the typeahead handler to the `onKeyDown` event's default case, after checking for arrow keys and other control keys.
+
+## Disabled Items
+
+Disabled menu items should be **focusable but not activatable**. This differs from how disabled buttons work:
+
+```tsx
+<li
+  role="menuitem"
+  aria-disabled="true"
+  tabIndex={index === activeIndex ? 0 : -1}
+  onClick={(e) => {
+    if (item.disabled) {
+      e.preventDefault();
+      return;
+    }
+    item.onSelect();
+  }}
+>
+  {item.label}
+</li>
+```
+
+<Callout type="tip">
+Do NOT skip disabled items during arrow key navigation. Users should be able to focus disabled items to discover they exist and understand why they are disabled (via tooltips or contextual help). The item simply does nothing when activated.
+</Callout>
+
+## Separators
+
+Visual separators between groups of menu items use `role="separator"`:
+
+```tsx
+<li role="separator" aria-orientation="horizontal" />
+```
+
+Separators are not focusable and are skipped during keyboard navigation. They must be excluded from the roving tabindex logic.
+
+## Menu vs. Listbox: Decision Guide
+
+| Question | If Yes → | If No → |
+|----------|----------|---------|
+| Does the item perform an action? | `menu` / `menuitem` | `listbox` / `option` |
+| Does the item select a value? | `listbox` / `option` | `menu` / `menuitem` |
+| Does focus wrap around? | `menu` (wraps) | `listbox` (clamps) |
+| Can items be checked? | `menuitemcheckbox` or `menuitemradio` | — |
+| Is it triggered by right-click? | `menu` (context menu) | — |
+
+## Key Takeaways
+
+1. **`role="menu"` is for actions**, not navigation. Use `<nav>` for navigation links.
+2. **Three item roles:** `menuitem` (actions), `menuitemcheckbox` (toggles), `menuitemradio` (radio groups).
+3. **Roving tabindex** with actual DOM focus movement — not `aria-activedescendant`.
+4. **Menu navigation wraps** — unlike listbox which clamps at boundaries.
+5. **Typeahead** lets users jump to items by typing the first characters.
+6. **Disabled items remain focusable** — they just do not activate.
+7. **Separators** use `role="separator"` and are skipped during navigation.
+8. **`ArrowRight` opens a submenu**, `ArrowLeft` closes it — matching native OS behavior.

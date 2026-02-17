@@ -1,0 +1,566 @@
+---
+title: "Building a Menu Component"
+description: "Build an accessible dropdown Menu component with trigger, keyboard navigation, submenus, and nested focus management."
+order: 2
+isFree: false
+---
+
+# Building a Menu Component
+
+A **Menu** component provides a trigger button that opens a dropdown panel of actionable items. Unlike a Select (which picks a value), a Menu executes commands — "Copy", "Delete", "Share", "Export as PDF". This lesson builds a full Menu with keyboard navigation, submenu support, and proper focus management.
+
+## ARIA Structure
+
+| Element | Role/Attribute | Purpose |
+|---------|----------------|---------|
+| Trigger button | `aria-haspopup="menu"` | Announces a menu will appear |
+| Trigger button | `aria-expanded` | Whether the menu is open |
+| Trigger button | `aria-controls` | Points to the menu's `id` |
+| Menu container | `role="menu"` | Identifies as a menu widget |
+| Each action | `role="menuitem"` | An activatable command |
+| Submenu trigger | `aria-haspopup="menu"` | This item opens a submenu |
+| Submenu trigger | `aria-expanded` | Whether the submenu is open |
+
+```tsx
+<button
+  aria-haspopup="menu"
+  aria-expanded={isOpen}
+  aria-controls="actions-menu"
+>
+  Actions
+</button>
+<ul role="menu" id="actions-menu">
+  <li role="menuitem">Copy</li>
+  <li role="menuitem">Paste</li>
+  <li role="separator" />
+  <li role="menuitem" aria-haspopup="menu" aria-expanded="false">
+    Share ▶
+  </li>
+</ul>
+```
+
+## Component API Design
+
+```tsx
+interface MenuProps {
+  children: React.ReactNode;
+}
+
+interface MenuItemProps {
+  onSelect?: () => void;
+  disabled?: boolean;
+}
+
+interface SubMenuProps {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}
+```
+
+Compound components:
+
+- **`Menu.Root`** — Manages open state and provides context.
+- **`Menu.Trigger`** — The button that opens the menu.
+- **`Menu.Content`** — The popup menu container with `role="menu"`.
+- **`Menu.Item`** — Individual actionable menu items.
+- **`Menu.Separator`** — Visual divider between groups.
+- **`Menu.Sub`** — Submenu wrapper for nested menus.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface MenuContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  activeIndex: number;
+  setActiveIndex: (index: number) => void;
+  items: React.RefObject<HTMLElement[]>;
+  registerItem: (el: HTMLElement) => void;
+  unregisterItem: (el: HTMLElement) => void;
+  menuId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  closeMenu: () => void;
+}
+
+const MenuContext = React.createContext<MenuContextValue | null>(null);
+
+function useMenuContext() {
+  const ctx = React.useContext(MenuContext);
+  if (!ctx) throw new Error("Menu components must be used within Menu.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({ children }: MenuProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const items = React.useRef<HTMLElement[]>([]);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const menuId = `menu-${React.useId()}`;
+
+  const registerItem = React.useCallback((el: HTMLElement) => {
+    if (!items.current.includes(el)) {
+      items.current.push(el);
+    }
+  }, []);
+
+  const unregisterItem = React.useCallback((el: HTMLElement) => {
+    items.current = items.current.filter((item) => item !== el);
+  }, []);
+
+  const closeMenu = React.useCallback(() => {
+    setIsOpen(false);
+    setActiveIndex(0);
+    triggerRef.current?.focus();
+  }, []);
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      activeIndex,
+      setActiveIndex,
+      items,
+      registerItem,
+      unregisterItem,
+      menuId,
+      triggerRef,
+      closeMenu,
+    }),
+    [isOpen, activeIndex, registerItem, unregisterItem, menuId, closeMenu],
+  );
+
+  return <MenuContext value={ctx}>{children}</MenuContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { isOpen, setIsOpen, setActiveIndex, items, menuId, triggerRef } =
+    useMenuContext();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "ArrowDown":
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        setIsOpen(true);
+        setActiveIndex(0);
+        // Focus the first menu item after render
+        requestAnimationFrame(() => {
+          items.current[0]?.focus();
+        });
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        setIsOpen(true);
+        const lastIndex = items.current.length - 1;
+        setActiveIndex(lastIndex);
+        requestAnimationFrame(() => {
+          items.current[lastIndex]?.focus();
+        });
+        break;
+      }
+    }
+  };
+
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      aria-haspopup="menu"
+      aria-expanded={isOpen}
+      aria-controls={menuId}
+      onClick={() => {
+        if (isOpen) {
+          setIsOpen(false);
+        } else {
+          setIsOpen(true);
+          setActiveIndex(0);
+          requestAnimationFrame(() => {
+            items.current[0]?.focus();
+          });
+        }
+      }}
+      onKeyDown={handleKeyDown}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const { isOpen, setIsOpen, activeIndex, setActiveIndex, items, menuId, closeMenu } =
+    useMenuContext();
+
+  // Typeahead
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  // Click outside
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const menu = document.getElementById(menuId);
+      if (menu?.contains(e.target as Node)) return;
+      closeMenu();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen, menuId, closeMenu]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const count = items.current.length;
+    if (count === 0) return;
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (activeIndex + 1) % count;
+        setActiveIndex(next);
+        items.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (activeIndex - 1 + count) % count;
+        setActiveIndex(prev);
+        items.current[prev]?.focus();
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setActiveIndex(0);
+        items.current[0]?.focus();
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        const last = count - 1;
+        setActiveIndex(last);
+        items.current[last]?.focus();
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      case "Tab": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      default: {
+        // Typeahead
+        if (e.key.length === 1) {
+          clearTimeout(timeoutRef.current);
+          bufferRef.current += e.key.toLowerCase();
+
+          const matchIndex = items.current.findIndex((el) =>
+            el.textContent?.toLowerCase().startsWith(bufferRef.current),
+          );
+          if (matchIndex !== -1) {
+            setActiveIndex(matchIndex);
+            items.current[matchIndex]?.focus();
+          }
+
+          timeoutRef.current = setTimeout(() => {
+            bufferRef.current = "";
+          }, 500);
+        }
+      }
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <ul role="menu" id={menuId} onKeyDown={handleKeyDown} {...props}>
+      {children}
+    </ul>
+  );
+}
+
+// --- Item ---
+
+function Item({
+  onSelect,
+  disabled = false,
+  children,
+  ...props
+}: MenuItemProps & React.ComponentPropsWithoutRef<"li">) {
+  const { registerItem, unregisterItem, closeMenu, setActiveIndex, items } =
+    useMenuContext();
+
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) {
+        registerItem(el);
+      } else if (el === null) {
+        // Cleanup handled by unregisterItem
+      }
+    },
+    [registerItem],
+  );
+
+  const handleClick = () => {
+    if (disabled) return;
+    onSelect?.();
+    closeMenu();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  const index = items.current.findIndex(
+    (el) => el === document.activeElement,
+  );
+
+  return (
+    <li
+      ref={ref}
+      role="menuitem"
+      tabIndex={-1}
+      aria-disabled={disabled || undefined}
+      data-disabled={disabled || undefined}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        const idx = items.current.indexOf(
+          document.activeElement as HTMLElement,
+        );
+        if (idx !== -1) setActiveIndex(idx);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+// --- Separator ---
+
+function Separator(props: React.ComponentPropsWithoutRef<"li">) {
+  return <li role="separator" {...props} />;
+}
+
+export const Menu = { Root, Trigger, Content, Item, Separator };
+```
+
+## Focus Management Deep Dive
+
+The critical difference between Menu and Select is where DOM focus lives:
+
+| Component | Focus Location | Why |
+|-----------|---------------|-----|
+| Select | Trigger button (always) | `aria-activedescendant` handles virtual focus |
+| Menu | Menu items (when open) | Items receive actual DOM focus for direct activation |
+
+When the menu opens, focus moves to the first menu item. When the menu closes, focus returns to the trigger button. This focus restoration is essential for keyboard users to maintain their place in the page.
+
+```tsx
+// Opening: move focus to first item
+setIsOpen(true);
+requestAnimationFrame(() => {
+  items.current[0]?.focus();
+});
+
+// Closing: restore focus to trigger
+setIsOpen(false);
+triggerRef.current?.focus();
+```
+
+<Callout type="warning">
+Use `requestAnimationFrame` when focusing menu items on open. The menu DOM must be rendered before you can call `.focus()` on its children. Without the frame delay, the element may not exist yet.
+</Callout>
+
+## Building Submenus
+
+Submenus add a layer of complexity. A menu item with `aria-haspopup="menu"` indicates it opens a submenu when activated or when `ArrowRight` is pressed.
+
+```tsx
+function SubMenu({
+  label,
+  children,
+}: SubMenuProps) {
+  const [isSubOpen, setIsSubOpen] = React.useState(false);
+  const subItems = React.useRef<HTMLElement[]>([]);
+  const subMenuId = `submenu-${React.useId()}`;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsSubOpen(true);
+      requestAnimationFrame(() => {
+        subItems.current[0]?.focus();
+      });
+    }
+  };
+
+  const handleSubKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft" || e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsSubOpen(false);
+      // Focus returns to the submenu trigger item
+    }
+  };
+
+  return (
+    <li
+      role="menuitem"
+      aria-haspopup="menu"
+      aria-expanded={isSubOpen}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      {label}
+      {isSubOpen && (
+        <ul
+          role="menu"
+          id={subMenuId}
+          onKeyDown={handleSubKeyDown}
+        >
+          {children}
+        </ul>
+      )}
+    </li>
+  );
+}
+```
+
+### Submenu Positioning
+
+Submenus typically appear to the right of the parent item. In LTR layouts:
+
+```css
+.submenu-item {
+  position: relative;
+}
+
+.submenu-content {
+  position: absolute;
+  left: 100%;
+  top: 0;
+}
+```
+
+### Focus Flow in Nested Menus
+
+```
+Trigger → [opens] → Menu
+  Item 1
+  Item 2 (has submenu) → [ArrowRight] → Submenu
+    Sub-item 1
+    Sub-item 2
+    [ArrowLeft] → Back to Item 2
+  Item 3
+  [Escape] → Close menu → Back to Trigger
+```
+
+<Callout type="info">
+`Escape` should close only the innermost open menu. If a submenu is open, `Escape` closes the submenu but keeps the parent menu open. Only when the top-level menu receives `Escape` does the entire menu system close.
+</Callout>
+
+## Handling Pointer Interactions
+
+Menus should also respond to pointer hover for submenu opening:
+
+```tsx
+const hoverTimeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+const handlePointerEnter = () => {
+  clearTimeout(hoverTimeoutRef.current);
+  hoverTimeoutRef.current = setTimeout(() => {
+    setIsSubOpen(true);
+  }, 150); // Small delay prevents accidental opens
+};
+
+const handlePointerLeave = () => {
+  clearTimeout(hoverTimeoutRef.current);
+  hoverTimeoutRef.current = setTimeout(() => {
+    setIsSubOpen(false);
+  }, 300);
+};
+```
+
+The delay on open (150ms) prevents submenus from flickering as the user moves the pointer diagonally across menu items. The longer delay on close (300ms) gives the user time to move from the parent item to the submenu without it closing.
+
+## Styling Menus
+
+```css
+[role="menu"] {
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+[role="menuitem"] {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.4;
+  min-height: 36px;
+}
+
+[role="menuitem"]:focus-visible {
+  outline: none;
+  background: var(--color-accent-subtle);
+}
+
+[role="menuitem"][data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+[role="separator"] {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-border);
+}
+```
+
+## Key Takeaways
+
+1. **Menu = trigger + popup with `role="menu"`.** Items receive actual DOM focus.
+2. **Focus moves into the menu** on open and **returns to the trigger** on close.
+3. **Arrow keys wrap** around the first and last items.
+4. **`ArrowRight` opens submenus**, `ArrowLeft` closes them — matching OS behavior.
+5. **`Escape` closes only the innermost** open menu level.
+6. **Typeahead** lets users jump to items by typing.
+7. **Pointer hover** opens submenus with a small delay to prevent flicker.
+8. **`requestAnimationFrame`** is needed when focusing items after the menu renders.
+
+## Try It Yourself
+
+<Exercise id="menu-basic" />

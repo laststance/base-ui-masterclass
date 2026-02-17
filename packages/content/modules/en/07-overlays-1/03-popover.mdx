@@ -1,0 +1,455 @@
+---
+title: "Building a Popover Component"
+description: "Learn how to build an accessible Popover component with click triggers, focus management, close on outside click and Escape, and aria-expanded."
+order: 3
+isFree: false
+---
+
+# Building a Popover Component
+
+A **popover** is an interactive overlay anchored to a trigger element. Unlike tooltips (which are non-interactive and triggered by hover), popovers are opened by clicking and can contain rich interactive content — forms, buttons, links, and more.
+
+## Tooltip vs. Popover
+
+Understanding the distinction is critical because it determines the ARIA semantics, interaction model, and focus management:
+
+| Characteristic | Tooltip | Popover |
+|---------------|---------|---------|
+| Trigger | Hover / Focus | Click |
+| Content | Text only | Interactive content (buttons, links, forms) |
+| ARIA role | `tooltip` | None (or `dialog` for complex ones) |
+| ARIA link | `aria-describedby` | `aria-expanded` + `aria-controls` |
+| Focus | Stays on trigger | Moves into popover |
+| Interactive | No (`pointer-events: none`) | Yes |
+| Dismissal | Mouse leave / blur | Outside click / Escape |
+
+## ARIA Semantics
+
+For simple popovers, the key ARIA attributes are on the **trigger**:
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `aria-expanded` | Trigger button | `"true"` when open, `"false"` when closed |
+| `aria-controls` | Trigger button | Points to the popover's `id` |
+| `aria-haspopup` | Trigger button | Indicates the button opens a popup |
+| `id` | Popover element | Referenced by `aria-controls` |
+
+```tsx
+<button
+  aria-expanded="true"
+  aria-controls="popover-1"
+  aria-haspopup="dialog"
+>
+  Settings
+</button>
+<div id="popover-1" role="dialog" aria-label="Settings">
+  Popover content with interactive elements...
+</div>
+```
+
+<Callout type="info">
+For popovers with interactive content that traps focus, adding `role="dialog"` is appropriate. For simpler popovers (like a date picker dropdown), you might omit the role or use a more specific one. The key requirement is always `aria-expanded` on the trigger.
+</Callout>
+
+## Interaction Model
+
+### Opening
+
+The popover opens when the user **clicks** the trigger. Unlike tooltips, hover does not open a popover — this prevents accidental activation.
+
+### Focus Management
+
+When the popover opens, focus should move to the **first focusable element** inside the popover, or to the popover container itself if there are no focusable children. This is essential for keyboard users who otherwise would not know the popover appeared.
+
+```tsx
+function focusFirstElement(container: HTMLElement) {
+  const focusableSelectors = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(", ");
+
+  const firstFocusable = container.querySelector<HTMLElement>(focusableSelectors);
+  if (firstFocusable) {
+    firstFocusable.focus();
+  } else {
+    container.focus();
+  }
+}
+```
+
+### Closing
+
+A popover can be closed by:
+
+| Action | How It Works |
+|--------|-------------|
+| **Escape key** | `keydown` listener on the document |
+| **Outside click** | `mousedown` listener on the document |
+| **Trigger re-click** | Toggle behavior on the trigger |
+
+When the popover closes, focus must return to the trigger element. This is a critical accessibility requirement — losing focus leaves keyboard users stranded.
+
+### Outside Click Detection
+
+Detecting clicks outside the popover requires checking if the click target is within the popover or the trigger:
+
+```tsx
+React.useEffect(() => {
+  if (!open) return;
+
+  function handleMouseDown(e: MouseEvent) {
+    const target = e.target as Node;
+    const isInsidePopover = popoverRef.current?.contains(target);
+    const isInsideTrigger = triggerRef.current?.contains(target);
+
+    if (!isInsidePopover && !isInsideTrigger) {
+      close();
+    }
+  }
+
+  document.addEventListener("mousedown", handleMouseDown);
+  return () => document.removeEventListener("mousedown", handleMouseDown);
+}, [open, close]);
+```
+
+<Callout type="warning">
+Use `mousedown` instead of `click` for outside click detection. The `click` event fires after `mouseup`, which means if the user starts a click inside the popover and releases outside (or vice versa), the behavior becomes unpredictable. `mousedown` provides immediate, deterministic detection.
+</Callout>
+
+## Component API Design
+
+```tsx
+interface PopoverProps {
+  open?: boolean;                 // Controlled open state
+  defaultOpen?: boolean;          // Uncontrolled default
+  onOpenChange?: (open: boolean) => void;
+  placement?: Placement;          // Floating UI placement
+}
+```
+
+Compound components:
+
+- **`Popover.Root`** — Manages open state and provides context.
+- **`Popover.Trigger`** — Button that toggles the popover.
+- **`Popover.Content`** — The floating popover panel rendered through a portal.
+- **`Popover.Close`** — Optional button inside the popover that closes it.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+  type Placement,
+} from "@floating-ui/react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface PopoverContextValue {
+  open: boolean;
+  toggle: () => void;
+  close: () => void;
+  popoverId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  refs: ReturnType<typeof useFloating>["refs"];
+  floatingStyles: React.CSSProperties;
+}
+
+const PopoverContext = React.createContext<PopoverContextValue | null>(null);
+
+function usePopoverContext() {
+  const ctx = React.useContext(PopoverContext);
+  if (!ctx) throw new Error("Popover components must be used within Popover.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  placement = "bottom",
+  children,
+}: PopoverProps & { children: React.ReactNode }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const popoverId = React.useId();
+
+  const setOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [controlledOpen, onOpenChange],
+  );
+
+  const toggle = React.useCallback(() => setOpen(!open), [setOpen, open]);
+  const close = React.useCallback(() => setOpen(false), [setOpen]);
+
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement,
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  const ctx = React.useMemo(
+    () => ({ open, toggle, close, popoverId, triggerRef, refs, floatingStyles }),
+    [open, toggle, close, popoverId, triggerRef, refs, floatingStyles],
+  );
+
+  return <PopoverContext value={ctx}>{children}</PopoverContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { open, toggle, popoverId, triggerRef, refs } = usePopoverContext();
+
+  const ref = React.useCallback(
+    (el: HTMLButtonElement | null) => {
+      triggerRef.current = el;
+      refs.setReference(el);
+    },
+    [triggerRef, refs],
+  );
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-expanded={open}
+      aria-controls={open ? popoverId : undefined}
+      aria-haspopup="dialog"
+      onClick={toggle}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, close, popoverId, triggerRef, refs, floatingStyles } =
+    usePopoverContext();
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Merge refs
+  const setRefs = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      contentRef.current = el;
+      refs.setFloating(el);
+    },
+    [refs],
+  );
+
+  // Focus first focusable element when opened
+  React.useEffect(() => {
+    if (!open || !contentRef.current) return;
+
+    const focusableSelectors = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    const firstFocusable =
+      contentRef.current.querySelector<HTMLElement>(focusableSelectors);
+
+    if (firstFocusable) {
+      firstFocusable.focus();
+    } else {
+      contentRef.current.focus();
+    }
+  }, [open]);
+
+  // Close on Escape
+  React.useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        close();
+        triggerRef.current?.focus(); // Return focus to trigger
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, close, triggerRef]);
+
+  // Close on outside click
+  React.useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        !contentRef.current?.contains(target) &&
+        !triggerRef.current?.contains(target)
+      ) {
+        close();
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [open, close, triggerRef]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      ref={setRefs}
+      id={popoverId}
+      role="dialog"
+      aria-label="Popover"
+      tabIndex={-1}
+      style={floatingStyles}
+      className={className}
+      {...props}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+// --- Close Button ---
+
+function Close({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { close, triggerRef } = usePopoverContext();
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        close();
+        triggerRef.current?.focus();
+      }}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export const Popover = { Root, Trigger, Content, Close };
+```
+
+## Focus Return Pattern
+
+Returning focus to the trigger when the popover closes is a fundamental accessibility pattern. The implementation stores a ref to the trigger and calls `.focus()` on close:
+
+```tsx
+// When closing via Escape:
+close();
+triggerRef.current?.focus();
+
+// When closing via outside click:
+close();
+triggerRef.current?.focus();
+
+// When closing via the Close button:
+close();
+triggerRef.current?.focus();
+```
+
+Every close path must return focus. Missing even one creates a broken keyboard experience.
+
+## Usage Example
+
+```tsx
+function SettingsPopover() {
+  return (
+    <Popover.Root>
+      <Popover.Trigger>
+        Settings
+      </Popover.Trigger>
+      <Popover.Content className="popover" aria-label="Quick settings">
+        <h3>Quick Settings</h3>
+        <label>
+          <input type="checkbox" /> Dark mode
+        </label>
+        <label>
+          <input type="checkbox" /> Notifications
+        </label>
+        <Popover.Close>Done</Popover.Close>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+```
+
+## CSS Strategies
+
+```css
+.popover {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  min-width: 200px;
+  z-index: 50;
+}
+
+.popover:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+```
+
+## Popover vs. Dialog: When to Upgrade
+
+As your popover becomes more complex, you may need a full **Dialog**:
+
+| Stay with Popover | Upgrade to Dialog |
+|------------------|-------------------|
+| 1-3 interactive elements | Complex form with many fields |
+| Quick action (toggle, select) | Multi-step workflow |
+| No backdrop needed | Background interaction should be blocked |
+| Light focus management | Full focus trap required |
+
+We will build the Dialog component in the next module.
+
+## Key Takeaways
+
+1. **`aria-expanded`** on the trigger announces open/closed state to screen readers.
+2. **Click-triggered** — popovers open on click, not hover.
+3. **Focus management** — move focus into the popover on open, return to trigger on close.
+4. **Outside click** via `mousedown` listener closes the popover reliably.
+5. **Escape key** must close the popover and return focus to the trigger.
+6. **Portal rendering** prevents CSS overflow and stacking context issues.
+7. **Every close path** must return focus to the trigger.
+
+## Try It Yourself
+
+<Exercise id="popover-basic" />

@@ -1,0 +1,259 @@
+---
+title: "Bundling with tsup"
+description: "Learn how to bundle your component library with tsup for ESM and CJS dual output, tree-shaking, per-component entry points, and package.json exports field configuration."
+order: 1
+isFree: false
+---
+
+# Bundling with tsup
+
+You have built an entire headless component library. Now it is time to ship it. **Bundling** is the process of transforming your TypeScript source into distributable JavaScript that consumers can install and import. In this lesson, we configure [tsup](https://tsup.egoist.dev/) — a zero-config bundler powered by esbuild — to produce a production-ready package.
+
+## Why tsup?
+
+Component library bundling has specific requirements that general-purpose bundlers (Webpack, Vite) are not optimized for:
+
+| Requirement | Why It Matters |
+|-------------|---------------|
+| ESM + CJS dual output | Consumers may use either module system |
+| TypeScript declarations | Type safety for consumers |
+| Tree-shaking support | Dead code elimination in consumer builds |
+| Fast iteration | Rebuild in milliseconds during development |
+| Minimal configuration | Focus on components, not build tooling |
+
+tsup handles all of these out of the box. It uses esbuild for JavaScript bundling (extremely fast) and the TypeScript compiler for declaration generation.
+
+## Basic Configuration
+
+Create a `tsup.config.ts` at the root of your package:
+
+```tsx
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: ["src/index.ts"],
+  format: ["esm", "cjs"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  splitting: true,
+  treeshake: true,
+});
+```
+
+| Option | Purpose |
+|--------|---------|
+| `entry` | Input files to bundle |
+| `format: ["esm", "cjs"]` | Dual output for both module systems |
+| `dts: true` | Generate `.d.ts` declaration files |
+| `sourcemap: true` | Enable source maps for debugging |
+| `clean: true` | Remove `dist/` before each build |
+| `splitting: true` | Code splitting for shared modules (ESM only) |
+| `treeshake: true` | Remove dead code via esbuild |
+
+Running `tsup` produces:
+
+```
+dist/
+  index.mjs          # ESM output
+  index.js            # CJS output
+  index.d.mts         # ESM declarations
+  index.d.ts          # CJS declarations
+  index.mjs.map       # ESM source map
+  index.js.map        # CJS source map
+```
+
+## Per-Component Entry Points
+
+A single `index.ts` barrel file forces consumers to import the entire library even if they only use one component. Per-component entry points enable tree-shaking at the import level:
+
+```tsx
+// tsup.config.ts
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: {
+    index: "src/index.ts",
+    button: "src/button/index.ts",
+    switch: "src/switch/index.ts",
+    tabs: "src/tabs/index.ts",
+    accordion: "src/accordion/index.ts",
+    slider: "src/slider/index.ts",
+    "number-field": "src/number-field/index.ts",
+    toast: "src/toast/index.ts",
+    "scroll-area": "src/scroll-area/index.ts",
+    progress: "src/progress/index.ts",
+  },
+  format: ["esm", "cjs"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  splitting: true,
+  treeshake: true,
+  external: ["react", "react-dom"],
+});
+```
+
+<Callout type="info">
+Always mark `react` and `react-dom` as `external`. These are peer dependencies — the consumer's application provides them. Bundling React into your library would cause duplicate React instances and break hooks.
+</Callout>
+
+Now consumers can import individual components:
+
+```tsx
+// Only loads button code, not the entire library
+import { Button } from "@mylib/ui/button";
+```
+
+## The `package.json` Exports Field
+
+The `exports` field (also called "export map") in `package.json` tells Node.js and bundlers how to resolve your package's entry points. This is the modern replacement for the `main` and `module` fields:
+
+```json
+{
+  "name": "@mylib/ui",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./button": {
+      "import": {
+        "types": "./dist/button.d.mts",
+        "default": "./dist/button.mjs"
+      },
+      "require": {
+        "types": "./dist/button.d.ts",
+        "default": "./dist/button.js"
+      }
+    },
+    "./slider": {
+      "import": {
+        "types": "./dist/slider.d.mts",
+        "default": "./dist/slider.mjs"
+      },
+      "require": {
+        "types": "./dist/slider.d.ts",
+        "default": "./dist/slider.js"
+      }
+    }
+  },
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}
+```
+
+### Condition Order Matters
+
+Within each export entry, conditions are evaluated top to bottom. The `types` condition must come first so TypeScript resolves declarations before JavaScript:
+
+```json
+{
+  "import": {
+    "types": "./dist/index.d.mts",   // TypeScript checks this first
+    "default": "./dist/index.mjs"     // Runtime uses this
+  }
+}
+```
+
+<Callout type="warning">
+If `types` is listed after `default`, some TypeScript versions may fail to find your type declarations. Always put `types` first in each condition block.
+</Callout>
+
+## `sideEffects: false`
+
+The `sideEffects: false` field tells bundlers (Webpack, Rollup, esbuild) that every module in your package is side-effect-free. This enables aggressive tree-shaking: if a consumer imports only `Button`, the bundler can safely remove all other components from the final bundle.
+
+A module has side effects if importing it changes global state (e.g., registering a web component, modifying `window`, running a polyfill). Headless React components are inherently side-effect-free because they only export functions and components — they do nothing when imported.
+
+```json
+{
+  "sideEffects": false
+}
+```
+
+If you have specific files with side effects (e.g., a CSS import), you can list them:
+
+```json
+{
+  "sideEffects": ["./dist/**/*.css"]
+}
+```
+
+## Build Scripts
+
+Add these scripts to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  }
+}
+```
+
+The `prepublishOnly` script ensures a fresh build before every `npm publish`, preventing stale artifacts from being shipped.
+
+## Verifying Your Bundle
+
+After building, verify the output:
+
+```bash
+# Check file sizes
+du -sh dist/*
+
+# Verify ESM imports work
+node --input-type=module -e "import { Button } from './dist/button.mjs'; console.log(Button);"
+
+# Verify CJS requires work
+node -e "const { Button } = require('./dist/button.js'); console.log(Button);"
+
+# Check exports resolution
+node --input-type=module -e "import { Button } from '@mylib/ui/button'; console.log(Button);"
+```
+
+<Callout type="tip">
+Use [publint](https://publint.dev/) to validate your `package.json` exports field. It catches common misconfigurations like missing declaration files, wrong condition order, and unreachable entry points before you publish.
+</Callout>
+
+## Advanced: Banner and Footer
+
+If you need to add a `"use client"` directive for React Server Components compatibility, tsup supports the `banner` option:
+
+```tsx
+export default defineConfig({
+  // ...
+  banner: {
+    js: '"use client";',
+  },
+});
+```
+
+This prepends `"use client"` to every output file, ensuring your components work in Next.js App Router and other RSC environments.
+
+## Key Takeaways
+
+1. **Use tsup** for fast, zero-config bundling of React component libraries.
+2. **Output both ESM and CJS** to support all consumer environments.
+3. **Per-component entry points** enable import-level tree-shaking.
+4. **The `exports` field** in `package.json` is the modern way to define entry point resolution. Always put `types` before `default`.
+5. **`sideEffects: false`** enables aggressive tree-shaking because headless components have no import-time side effects.
+6. **Mark `react` and `react-dom` as external** to avoid bundling duplicate React instances.
+7. **Run `publint`** before publishing to catch exports misconfigurations.

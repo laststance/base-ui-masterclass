@@ -1,0 +1,295 @@
+---
+title: "Building a NumberField Component"
+description: "Learn how to build an accessible NumberField with increment/decrement buttons, keyboard arrow keys, min/max/step constraints, and role='spinbutton' semantics."
+order: 1
+isFree: false
+---
+
+# Building a NumberField Component
+
+A **NumberField** lets users input a numeric value by typing directly or using increment/decrement buttons. While native `<input type="number">` exists, its styling and behavior vary wildly across browsers. A headless NumberField gives us full control over the UX while maintaining proper accessibility semantics.
+
+## Why Not `<input type="number">`?
+
+The native number input has several pain points:
+
+- **Inconsistent spinner UI**: Chrome shows tiny up/down arrows inside the field; Firefox shows them on hover; Safari hides them entirely.
+- **No custom button placement**: You cannot position increment/decrement buttons outside the input.
+- **Scroll hijacking**: Some browsers change the value when scrolling over a focused number input, which is unexpected behavior.
+- **Validation quirks**: Non-numeric characters are silently ignored in some browsers but not others.
+
+A headless approach lets us define the exact interaction model while using the `spinbutton` ARIA role to preserve screen reader compatibility.
+
+## ARIA Spinbutton Pattern
+
+The WAI-ARIA specification defines the `spinbutton` role for numeric inputs with stepping behavior:
+
+| Attribute | Purpose | Example |
+|-----------|---------|---------|
+| `role="spinbutton"` | Identifies as a numeric stepper | Applied to the input |
+| `aria-valuenow` | Current numeric value | `42` |
+| `aria-valuemin` | Minimum allowed value | `0` |
+| `aria-valuemax` | Maximum allowed value | `100` |
+| `aria-valuetext` | Human-readable alternative | `"42 items"` |
+| `aria-label` | Accessible name | `"Quantity"` |
+
+Screen readers announce: "Quantity, spin button, 42, minimum 0, maximum 100."
+
+## Keyboard Interaction
+
+| Key | Action |
+|-----|--------|
+| `ArrowUp` | Increment by step |
+| `ArrowDown` | Decrement by step |
+| `Home` | Set to minimum value |
+| `End` | Set to maximum value |
+| `Page Up` | Increment by larger step (10x) |
+| `Page Down` | Decrement by larger step (10x) |
+
+These keyboard shortcuts are defined by the ARIA spinbutton pattern and expected by assistive technology users.
+
+## Component API Design
+
+```tsx
+interface NumberFieldProps {
+  value?: number;
+  defaultValue?: number;
+  onValueChange?: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+}
+```
+
+Compound components:
+
+- **`NumberField.Root`** — Manages the numeric state and provides context.
+- **`NumberField.Input`** — The text input displaying and accepting the current value.
+- **`NumberField.Increment`** — Button to increase the value by one step.
+- **`NumberField.Decrement`** — Button to decrease the value by one step.
+
+## Clamping and Step Logic
+
+The core logic for a NumberField involves clamping values within bounds and snapping to step increments:
+
+```tsx
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function snapToStep(value: number, min: number, step: number): number {
+  const steps = Math.round((value - min) / step);
+  return min + steps * step;
+}
+```
+
+<Callout type="warning">
+Floating-point arithmetic can cause precision issues. For example, `0.1 + 0.2` produces `0.30000000000000004`. When working with decimal steps, consider rounding to a fixed number of decimal places derived from the step precision.
+</Callout>
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+interface NumberFieldContextValue {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  disabled: boolean;
+  increment: () => void;
+  decrement: () => void;
+  setValue: (v: number) => void;
+  inputId: string;
+}
+
+const NumberFieldContext = React.createContext<NumberFieldContextValue | null>(null);
+
+function useNumberFieldContext() {
+  const ctx = React.useContext(NumberFieldContext);
+  if (!ctx) throw new Error("NumberField sub-components must be used within NumberField.Root");
+  return ctx;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function Root({
+  value: controlledValue,
+  defaultValue = 0,
+  onValueChange,
+  min = -Infinity,
+  max = Infinity,
+  step = 1,
+  disabled = false,
+  children,
+  ...props
+}: NumberFieldProps & React.ComponentPropsWithoutRef<"div">) {
+  const [internalValue, setInternalValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const value = controlledValue ?? internalValue;
+  const inputId = React.useId();
+
+  const updateValue = React.useCallback(
+    (next: number) => {
+      const clamped = clamp(next, min, max);
+      if (controlledValue === undefined) setInternalValue(clamped);
+      onValueChange?.(clamped);
+    },
+    [min, max, controlledValue, onValueChange],
+  );
+
+  const increment = React.useCallback(
+    () => updateValue(value + step),
+    [value, step, updateValue],
+  );
+
+  const decrement = React.useCallback(
+    () => updateValue(value - step),
+    [value, step, updateValue],
+  );
+
+  const ctx = React.useMemo(
+    () => ({ value, min, max, step, disabled, increment, decrement, setValue: updateValue, inputId }),
+    [value, min, max, step, disabled, increment, decrement, updateValue, inputId],
+  );
+
+  return (
+    <NumberFieldContext value={ctx}>
+      <div role="group" data-disabled={disabled || undefined} {...props}>
+        {children}
+      </div>
+    </NumberFieldContext>
+  );
+}
+
+function Input(props: React.ComponentPropsWithoutRef<"input">) {
+  const { value, min, max, step, disabled, increment, decrement, setValue, inputId } =
+    useNumberFieldContext();
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    switch (e.key) {
+      case "ArrowUp":
+        e.preventDefault();
+        increment();
+        break;
+      case "ArrowDown":
+        e.preventDefault();
+        decrement();
+        break;
+      case "Home":
+        e.preventDefault();
+        if (min !== -Infinity) setValue(min);
+        break;
+      case "End":
+        e.preventDefault();
+        if (max !== Infinity) setValue(max);
+        break;
+      case "PageUp":
+        e.preventDefault();
+        setValue(value + step * 10);
+        break;
+      case "PageDown":
+        e.preventDefault();
+        setValue(value - step * 10);
+        break;
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const parsed = parseFloat(e.target.value);
+    if (!Number.isNaN(parsed)) setValue(parsed);
+  };
+
+  return (
+    <input
+      id={inputId}
+      role="spinbutton"
+      type="text"
+      inputMode="numeric"
+      aria-valuenow={value}
+      aria-valuemin={min !== -Infinity ? min : undefined}
+      aria-valuemax={max !== Infinity ? max : undefined}
+      value={value}
+      disabled={disabled}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      {...props}
+    />
+  );
+}
+
+function Increment(props: React.ComponentPropsWithoutRef<"button">) {
+  const { increment, disabled, value, max } = useNumberFieldContext();
+  const atMax = value >= max;
+
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label="Increment"
+      disabled={disabled || atMax}
+      onClick={increment}
+      {...props}
+    />
+  );
+}
+
+function Decrement(props: React.ComponentPropsWithoutRef<"button">) {
+  const { decrement, disabled, value, min } = useNumberFieldContext();
+  const atMin = value <= min;
+
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label="Decrement"
+      disabled={disabled || atMin}
+      onClick={decrement}
+      {...props}
+    />
+  );
+}
+
+export const NumberField = { Root, Input, Increment, Decrement };
+```
+
+## Why `tabIndex={-1}` on Buttons?
+
+The increment and decrement buttons use `tabIndex={-1}` because the `spinbutton` input itself handles keyboard interaction via `ArrowUp` and `ArrowDown`. Users do not need to tab to separate buttons when the input already supports stepping. The buttons exist as a visual convenience for mouse and touch users.
+
+<Callout type="tip">
+If you want the buttons to be keyboard-accessible independently (for users who prefer explicit button clicks), remove `tabIndex={-1}`. Both approaches are valid; the ARIA spec leaves this as an implementation choice.
+</Callout>
+
+## Why `type="text"` with `inputMode="numeric"`?
+
+We use `type="text"` instead of `type="number"` to avoid the browser's built-in spinner and validation behavior. The `inputMode="numeric"` attribute tells mobile devices to show a numeric keyboard, giving us the best of both worlds: full styling control with appropriate mobile input.
+
+## Data Attributes for Styling
+
+Following our project conventions, we expose `data-disabled` for CSS-only conditional styling:
+
+```css
+[data-disabled] .number-field-input {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+## Key Takeaways
+
+1. **Use `role="spinbutton"`** with `aria-valuenow`, `aria-valuemin`, and `aria-valuemax` for proper screen reader announcements.
+2. **Arrow keys step the value** up and down; Home/End jump to min/max.
+3. **Clamp values** within min/max bounds on every update to prevent invalid states.
+4. **Use `type="text"` with `inputMode="numeric"`** to bypass native number input quirks while keeping mobile keyboards appropriate.
+5. **Set `tabIndex={-1}`** on stepper buttons because the input itself handles keyboard stepping.
+6. **Disable buttons at boundaries** (increment at max, decrement at min) to signal that no further stepping is possible.
+
+## Try It Yourself
+
+<Exercise id="number-field-basic" />

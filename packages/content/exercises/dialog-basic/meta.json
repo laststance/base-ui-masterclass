@@ -1,0 +1,35 @@
+{
+  "id": "dialog-basic",
+  "title": {
+    "en": "Build a Dialog Component",
+    "ja": "Dialogコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "08-overlays-2",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Use useState for open state and useCallback for setOpen to notify onOpenChange",
+      "Dialog.Trigger just needs onClick={() => setOpen(true)} and a ref",
+      "Dialog.Portal should use createPortal(children, document.body) wrapped in a data-portal div",
+      "Dialog.Overlay needs onClick={() => setOpen(false)} and data-dialog-overlay attribute",
+      "Dialog.Content needs role='dialog', aria-modal='true', aria-labelledby={titleId}, aria-describedby={descriptionId}",
+      "Add sentinel divs with tabIndex={0} before and after the content for focus trap cycling",
+      "On open, focus the [data-autofocus] element, or first focusable, or the container itself",
+      "Add document keydown listener for Escape to close, and useEffect to return focus to triggerRef on close",
+      "Dialog.Title needs id={titleId} and Dialog.Description needs id={descriptionId}"
+    ],
+    "ja": [
+      "open状態にはuseStateを使い、setOpenはonOpenChangeに通知するようuseCallbackで実装します",
+      "Dialog.TriggerはonClick={() => setOpen(true)}とrefだけ必要です",
+      "Dialog.PortalはcreatePortal(children, document.body)をdata-portal divで囲みます",
+      "Dialog.OverlayにはonClick={() => setOpen(false)}とdata-dialog-overlay属性が必要です",
+      "Dialog.Contentにはrole='dialog'、aria-modal='true'、aria-labelledby={titleId}、aria-describedby={descriptionId}が必要です",
+      "コンテンツの前後にtabIndex={0}のセンチネルdivを追加してフォーカストラップのタブ循環を実装します",
+      "open時に[data-autofocus]要素、または最初のフォーカス可能な要素、またはコンテナ自体にフォーカスします",
+      "ドキュメントのkeydownリスナーでEscapeで閉じ、useEffectでtriggerRefにフォーカスを戻します",
+      "Dialog.TitleにはID={titleId}、Dialog.Descriptionにはid={descriptionId}が必要です"
+    ]
+  },
+  "dependencies": {}
+}

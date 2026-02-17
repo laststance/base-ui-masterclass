@@ -1,0 +1,31 @@
+{
+  "id": "popover-basic",
+  "title": {
+    "en": "Build a Popover Component",
+    "ja": "Popoverコンポーネントを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "07-overlays-1",
+  "order": 3,
+  "hints": {
+    "en": [
+      "Use useState for open state with toggle() using setOpen(!open) and close() using setOpen(false)",
+      "Trigger needs aria-expanded={open}, aria-controls={popoverId} when open, and aria-haspopup='dialog'",
+      "Use createPortal(content, document.body) to render the popover content outside the component tree",
+      "Focus the first focusable element inside the popover when it opens using useEffect",
+      "Add a document-level keydown listener for Escape that calls close() and triggerRef.current?.focus()",
+      "Add a document-level mousedown listener that checks if target is outside both content and trigger",
+      "The Close button should call close() then triggerRef.current?.focus() to return focus"
+    ],
+    "ja": [
+      "open状態にはuseStateを使い、toggle()はsetOpen(!open)、close()はsetOpen(false)を実装します",
+      "Triggerにはaria-expanded={open}、open時のaria-controls={popoverId}、aria-haspopup='dialog'が必要です",
+      "createPortal(content, document.body)でコンポーネントツリー外にポップオーバーを描画します",
+      "useEffectでポップオーバーが開いた時に最初のフォーカス可能な要素にフォーカスします",
+      "ドキュメントレベルのkeydownリスナーでEscapeを検知してclose()とtriggerRef.current?.focus()を呼びます",
+      "ドキュメントレベルのmousedownリスナーでクリック先がcontentとtriggerの外かチェックします",
+      "Closeボタンはclose()してからtriggerRef.current?.focus()でフォーカスを戻します"
+    ]
+  },
+  "dependencies": {}
+}

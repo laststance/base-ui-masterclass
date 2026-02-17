@@ -1,0 +1,29 @@
+{
+  "id": "toast-basic",
+  "title": {
+    "en": "Build a Toast Notification System",
+    "ja": "Toast通知システムを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "11-advanced",
+  "order": 4,
+  "hints": {
+    "en": [
+      "Create an external store (array of toasts) with subscribe/getSnapshot functions for useSyncExternalStore",
+      "Use useSyncExternalStore to bridge the imperative toast store with React rendering",
+      "Use role='status' for informational toasts and role='alert' for error toasts",
+      "Keep the aria-live container always in the DOM so screen readers detect content changes",
+      "Track remaining time (not elapsed time) for pause-on-hover timer logic",
+      "The toast() function is a module-level export that calls addToast on the external store"
+    ],
+    "ja": [
+      "useSyncExternalStore用のsubscribe/getSnapshot関数を持つ外部ストア（toast配列）を作成します",
+      "useSyncExternalStoreで命令的なtoastストアとReactレンダリングを橋渡しします",
+      "情報トーストにはrole='status'、エラートーストにはrole='alert'を使用します",
+      "aria-liveコンテナを常にDOMに保持し、スクリーンリーダーがコンテンツ変更を検出できるようにします",
+      "ホバー時の一時停止タイマーロジックには経過時間ではなく残り時間を追跡します",
+      "toast()関数は外部ストアのaddToastを呼び出すモジュールレベルのエクスポートです"
+    ]
+  },
+  "dependencies": {}
+}
