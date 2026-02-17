@@ -1,13 +1,19 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getLocale } from "next-intl/server";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { getUserProgress } from "@/lib/actions/progress";
 import {
   modules,
   getExercisesForModule,
   type Locale,
 } from "@base-ui-masterclass/content";
+
+export const metadata: Metadata = {
+  title: "Dashboard — Base UI Masterclass",
+  description: "Track your course progress across all modules and exercises.",
+};
 
 /**
  * Student dashboard showing overall course progress.
@@ -18,7 +24,7 @@ import {
  * // /dashboard → shows progress for the authenticated user
  */
 export default async function DashboardPage() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user) {
     redirect("/login");
   }

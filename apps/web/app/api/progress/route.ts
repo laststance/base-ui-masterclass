@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { prisma } from "@base-ui-masterclass/database";
 
 /**
@@ -9,7 +9,7 @@ import { prisma } from "@base-ui-masterclass/database";
  * // Response: [{ exerciseId: "button-basic", completedAt: "2026-02-18T..." }]
  */
 export async function GET() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -33,13 +33,23 @@ export async function GET() {
  * // Response: { success: true, completedAt: "2026-02-18T..." }
  */
 export async function POST(request: NextRequest) {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json();
-  const exerciseId = body.exerciseId as string | undefined;
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON body" },
+      { status: 400 },
+    );
+  }
+  const exerciseId = (body as Record<string, unknown>)?.exerciseId as
+    | string
+    | undefined;
 
   if (!exerciseId) {
     return NextResponse.json(

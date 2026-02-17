@@ -1,54 +1,95 @@
-import NextAuth from "next-auth";
-import GitHub from "next-auth/providers/github";
-import Google from "next-auth/providers/google";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { nextCookies } from "better-auth/next-js";
+import { headers } from "next/headers";
 import { prisma } from "@base-ui-masterclass/database";
 
 /**
- * Auth.js v5 configuration with Prisma adapter.
- * Supports GitHub and Google OAuth providers.
- * Session callback attaches user ID and purchase status.
- *
- * @example
- * // In a Server Component:
- * import { auth } from "@/lib/auth";
- * const session = await auth();
- * if (session?.user?.id) { ... }
- *
- * @example
- * // In a Route Handler:
- * import { handlers } from "@/lib/auth";
- * export const { GET, POST } = handlers;
+ * Validates required OAuth environment variables at runtime.
+ * Called lazily on first session request to avoid build-time failures.
  */
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  providers: [GitHub, Google],
-  pages: {
-    signIn: "/login",
-  },
-  callbacks: {
-    async session({ session, user }) {
-      session.user.id = user.id;
+function validateAuthEnv() {
+  const requiredEnvVars = [
+    "AUTH_GITHUB_ID",
+    "AUTH_GITHUB_SECRET",
+    "AUTH_GOOGLE_ID",
+    "AUTH_GOOGLE_SECRET",
+  ] as const;
 
-      // Attach purchase status to session
-      const purchase = await prisma.purchase.findUnique({
-        where: { userId: user.id },
-        select: { status: true },
-      });
-      (session as SessionWithPurchase).hasPurchased =
-        purchase?.status === "active";
-
-      return session;
-    },
-  },
-});
-
-interface SessionWithPurchase {
-  hasPurchased: boolean;
-}
-
-declare module "next-auth" {
-  interface Session {
-    hasPurchased?: boolean;
+  const missing = requiredEnvVars.filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(", ")}`,
+    );
   }
 }
+
+/**
+ * BetterAuth server instance with Prisma adapter.
+ * Supports GitHub and Google OAuth providers.
+ *
+ * @example
+ * // In a Server Component or Server Action:
+ * import { auth, getSession } from "@/lib/auth";
+ * const session = await getSession();
+ * if (session?.user?.id) { ... }
+ */
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, { provider: "postgresql" }),
+  baseURL: process.env.NEXT_PUBLIC_APP_URL,
+  socialProviders: {
+    github: {
+      clientId: process.env.AUTH_GITHUB_ID!,
+      clientSecret: process.env.AUTH_GITHUB_SECRET!,
+    },
+    google: {
+      clientId: process.env.AUTH_GOOGLE_ID!,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
+    },
+  },
+  plugins: [nextCookies()],
+});
+
+/**
+ * Convenience wrapper for getting the current session.
+ * Centralizes the headers() wiring for BetterAuth.
+ *
+ * @returns BetterAuth session or null if unauthenticated
+ *
+ * @example
+ * const session = await getSession();
+ * if (session?.user?.id) { ... }
+ */
+export async function getSession() {
+  validateAuthEnv();
+  return auth.api.getSession({ headers: await headers() });
+}
+
+/**
+ * Session with purchase status for paywall checks.
+ * Queries the Purchase table and attaches `hasPurchased` to the session.
+ *
+ * @returns Session with hasPurchased flag, or null if unauthenticated
+ *
+ * @example
+ * const session = await getSessionWithPurchase();
+ * if (session?.hasPurchased) { // render premium content }
+ */
+export async function getSessionWithPurchase() {
+  const session = await getSession();
+  if (!session) return null;
+
+  const purchase = await prisma.purchase.findUnique({
+    where: { userId: session.user.id },
+    select: { status: true },
+  });
+
+  return {
+    ...session,
+    hasPurchased: purchase?.status === "active",
+  };
+}
+
+export type SessionWithPurchase = NonNullable<
+  Awaited<ReturnType<typeof getSessionWithPurchase>>
+>;

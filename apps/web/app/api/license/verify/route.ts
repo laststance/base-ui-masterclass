@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { prisma } from "@base-ui-masterclass/database";
 
 /**
@@ -12,7 +12,7 @@ import { prisma } from "@base-ui-masterclass/database";
  * // Body: { "licenseKey": "38b1460a-5104-4067-a91d-77b872934d51" }
  */
 export async function POST(request: NextRequest) {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -37,6 +37,13 @@ export async function POST(request: NextRequest) {
     },
   );
 
+  if (!response.ok) {
+    return NextResponse.json(
+      { error: "License validation service unavailable" },
+      { status: 502 },
+    );
+  }
+
   const result = await response.json();
 
   if (!result.valid) {
@@ -46,9 +53,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify product ID matches our course
+  // Verify product ID matches our course — fail closed if env unset
   const productId = process.env.LEMONSQUEEZY_PRODUCT_ID;
-  if (productId && String(result.meta?.product_id) !== productId) {
+  if (!productId) {
+    console.error("LEMONSQUEEZY_PRODUCT_ID is not configured");
+    return NextResponse.json(
+      { error: "Server configuration error" },
+      { status: 500 },
+    );
+  }
+  if (String(result.meta?.product_id) !== productId) {
     return NextResponse.json(
       { error: "License key is for a different product" },
       { status: 400 },

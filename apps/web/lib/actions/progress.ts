@@ -1,6 +1,6 @@
 "use server";
 
-import { auth } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { prisma } from "@base-ui-masterclass/database";
 
 export interface ProgressEntry {
@@ -29,7 +29,7 @@ export interface ModuleProgress {
 export async function completeExercise(
   exerciseId: string,
 ): Promise<{ success: boolean; completedAt?: Date; error?: string }> {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return { success: false, error: "Unauthorized" };
   }
@@ -62,7 +62,7 @@ export async function completeExercise(
  * progress.map(p => p.exerciseId); // ["button-basic", "input-basic", ...]
  */
 export async function getUserProgress(): Promise<ProgressEntry[]> {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return [];
   }
@@ -88,7 +88,7 @@ export async function getUserProgress(): Promise<ProgressEntry[]> {
 export async function isExerciseCompleted(
   exerciseId: string,
 ): Promise<boolean> {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return false;
   }
