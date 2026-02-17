@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 /**
  * Landing page for Base UI Masterclass.
  * Placeholder for the full marketing page (Phase 8).
@@ -10,7 +12,7 @@ export default function HomePage() {
     <main className="flex min-h-screen flex-col items-center justify-center px-6">
       <div className="max-w-2xl text-center">
         <p className="mb-4 text-sm font-mono tracking-widest uppercase text-text-secondary">
-          Premium Tutorial — $500
+          Premium Tutorial &mdash; $500
         </p>
         <h1 className="text-5xl md:text-7xl font-display font-800 leading-[0.95] tracking-tight mb-6">
           Build{" "}
@@ -20,7 +22,7 @@ export default function HomePage() {
         </h1>
         <p className="text-lg text-text-secondary leading-relaxed mb-10 max-w-lg mx-auto">
           Master headless React components by rebuilding all 35 Base UI
-          components. Compound patterns, accessibility, TypeScript — the
+          components. Compound patterns, accessibility, TypeScript &mdash; the
           complete package.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-4">
@@ -30,12 +32,12 @@ export default function HomePage() {
           >
             View Curriculum
           </a>
-          <a
-            href="/en/modules/00-foundation/01-introduction"
+          <Link
+            href="/modules/00-foundation/01-introduction"
             className="inline-flex h-12 items-center rounded-lg border border-border px-8 text-sm font-semibold text-text-primary transition-colors hover:bg-surface hover:border-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             Free Preview
-          </a>
+          </Link>
         </div>
         <div className="mt-16 flex items-center justify-center gap-8 text-text-muted text-sm font-mono">
           <span>35 Components</span>

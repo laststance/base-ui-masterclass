@@ -1,0 +1,32 @@
+{
+  "common": {
+    "signIn": "ログイン",
+    "signOut": "ログアウト",
+    "backToModules": "モジュール一覧へ",
+    "nextLesson": "次のレッスン",
+    "previousLesson": "前のレッスン",
+    "free": "無料",
+    "premium": "プレミアム",
+    "lessons": "レッスン",
+    "components": "コンポーネント",
+    "progress": "進捗",
+    "complete": "完了"
+  },
+  "course": {
+    "allModules": "全モジュール",
+    "moduleOverview": "モジュール概要",
+    "lessonOf": "レッスン {current} / {total}",
+    "startLesson": "レッスンを開始",
+    "continueLearning": "学習を続ける",
+    "completedBadge": "完了",
+    "lockedBadge": "購入が必要です"
+  },
+  "paywall": {
+    "signInTitle": "このレッスンにアクセスするにはログインが必要です",
+    "signInDescription": "これはプレミアムレッスンです。アカウントにログインし、ライセンスを確認してください。",
+    "purchaseTitle": "購入が必要です",
+    "purchaseDescription": "全35コンポーネント、45レッスン、Discordコミュニティへのライフタイムアクセスを取得しましょう。",
+    "buyNow": "今すぐ購入",
+    "enterLicense": "購入済みの方はライセンスキーを入力してください"
+  }
+}
