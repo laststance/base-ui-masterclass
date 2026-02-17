@@ -1,0 +1,549 @@
+---
+title: "Building a ContextMenu Component"
+description: "Build an accessible ContextMenu component with right-click trigger, pointer positioning, and the same keyboard patterns as Menu."
+order: 3
+isFree: false
+---
+
+# Building a ContextMenu Component
+
+A **ContextMenu** is a menu that appears at the pointer position when the user right-clicks (or long-presses on touch devices). It is functionally identical to a regular dropdown Menu — same ARIA roles, same keyboard navigation, same focus management — but with a different trigger mechanism and positioning strategy.
+
+## How ContextMenu Differs from Menu
+
+| Aspect | Menu | ContextMenu |
+|--------|------|-------------|
+| Trigger | Button click | Right-click (`contextmenu` event) |
+| Position | Below the trigger button | At the pointer coordinates |
+| Trigger element | Visible button | Invisible area (the "target") |
+| Opening key | Enter/Space/ArrowDown | Shift+F10 (Windows) or contextmenu key |
+| ARIA on trigger | `aria-haspopup="menu"` | None (the target area is just content) |
+
+The ARIA structure of the menu popup itself is identical:
+
+```tsx
+<ul role="menu" aria-label="File actions">
+  <li role="menuitem">Open</li>
+  <li role="menuitem">Rename</li>
+  <li role="separator" />
+  <li role="menuitem">Delete</li>
+</ul>
+```
+
+## The contextmenu Event
+
+The browser fires a `contextmenu` event when the user:
+- Right-clicks with a mouse
+- Presses `Ctrl + Click` on macOS
+- Long-presses on a touch device
+- Presses the context menu key (dedicated key on some keyboards)
+- Presses `Shift + F10` (Windows convention)
+
+```tsx
+const handleContextMenu = (e: React.MouseEvent) => {
+  e.preventDefault(); // Prevent the native context menu
+  setPosition({ x: e.clientX, y: e.clientY });
+  setIsOpen(true);
+};
+```
+
+<Callout type="warning">
+Always call `e.preventDefault()` on the `contextmenu` event. Without it, the browser's native context menu appears alongside your custom one, creating a confusing double-menu situation.
+</Callout>
+
+## Component API Design
+
+```tsx
+interface ContextMenuProps {
+  children: React.ReactNode;
+}
+
+interface ContextMenuItemProps {
+  onSelect?: () => void;
+  disabled?: boolean;
+}
+```
+
+Compound components:
+
+- **`ContextMenu.Root`** — Manages open state, position, and focus.
+- **`ContextMenu.Trigger`** — The area that responds to right-click.
+- **`ContextMenu.Content`** — The popup menu.
+- **`ContextMenu.Item`** — Individual menu items.
+- **`ContextMenu.Separator`** — Visual divider.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface ContextMenuContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  position: { x: number; y: number };
+  setPosition: (pos: { x: number; y: number }) => void;
+  activeIndex: number;
+  setActiveIndex: (index: number) => void;
+  items: React.RefObject<HTMLElement[]>;
+  registerItem: (el: HTMLElement) => void;
+  menuId: string;
+  closeMenu: () => void;
+}
+
+const ContextMenuContext =
+  React.createContext<ContextMenuContextValue | null>(null);
+
+function useContextMenuContext() {
+  const ctx = React.useContext(ContextMenuContext);
+  if (!ctx)
+    throw new Error(
+      "ContextMenu components must be used within ContextMenu.Root",
+    );
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({ children }: ContextMenuProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const items = React.useRef<HTMLElement[]>([]);
+  const menuId = `context-menu-${React.useId()}`;
+
+  const registerItem = React.useCallback((el: HTMLElement) => {
+    if (!items.current.includes(el)) {
+      items.current.push(el);
+    }
+  }, []);
+
+  const closeMenu = React.useCallback(() => {
+    setIsOpen(false);
+    setActiveIndex(0);
+    items.current = [];
+  }, []);
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      position,
+      setPosition,
+      activeIndex,
+      setActiveIndex,
+      items,
+      registerItem,
+      menuId,
+      closeMenu,
+    }),
+    [isOpen, position, activeIndex, registerItem, menuId, closeMenu],
+  );
+
+  return <ContextMenuContext value={ctx}>{children}</ContextMenuContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { setIsOpen, setPosition, setActiveIndex, items } =
+    useContextMenuContext();
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setPosition({ x: e.clientX, y: e.clientY });
+    setIsOpen(true);
+    setActiveIndex(0);
+
+    requestAnimationFrame(() => {
+      items.current[0]?.focus();
+    });
+  };
+
+  return (
+    <div onContextMenu={handleContextMenu} {...props}>
+      {children}
+    </div>
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const {
+    isOpen,
+    position,
+    activeIndex,
+    setActiveIndex,
+    items,
+    menuId,
+    closeMenu,
+  } = useContextMenuContext();
+
+  const menuRef = React.useRef<HTMLUListElement>(null);
+
+  // Typeahead
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  // Click outside to close
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const menu = document.getElementById(menuId);
+      if (menu?.contains(e.target as Node)) return;
+      closeMenu();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen, menuId, closeMenu]);
+
+  // Viewport boundary clamping
+  const [adjustedPosition, setAdjustedPosition] = React.useState(position);
+
+  React.useEffect(() => {
+    if (!isOpen || !menuRef.current) return;
+
+    const rect = menuRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let x = position.x;
+    let y = position.y;
+
+    // Prevent overflow on the right
+    if (x + rect.width > viewportWidth) {
+      x = viewportWidth - rect.width - 8;
+    }
+
+    // Prevent overflow on the bottom
+    if (y + rect.height > viewportHeight) {
+      y = viewportHeight - rect.height - 8;
+    }
+
+    // Prevent going off-screen to the left or top
+    x = Math.max(8, x);
+    y = Math.max(8, y);
+
+    setAdjustedPosition({ x, y });
+  }, [isOpen, position]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const count = items.current.length;
+    if (count === 0) return;
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (activeIndex + 1) % count;
+        setActiveIndex(next);
+        items.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (activeIndex - 1 + count) % count;
+        setActiveIndex(prev);
+        items.current[prev]?.focus();
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setActiveIndex(0);
+        items.current[0]?.focus();
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        const last = count - 1;
+        setActiveIndex(last);
+        items.current[last]?.focus();
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      case "Tab": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      default: {
+        // Typeahead
+        if (e.key.length === 1) {
+          clearTimeout(timeoutRef.current);
+          bufferRef.current += e.key.toLowerCase();
+
+          const matchIndex = items.current.findIndex((el) =>
+            el.textContent?.toLowerCase().startsWith(bufferRef.current),
+          );
+          if (matchIndex !== -1) {
+            setActiveIndex(matchIndex);
+            items.current[matchIndex]?.focus();
+          }
+
+          timeoutRef.current = setTimeout(() => {
+            bufferRef.current = "";
+          }, 500);
+        }
+      }
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <ul
+      ref={menuRef}
+      role="menu"
+      id={menuId}
+      onKeyDown={handleKeyDown}
+      style={{
+        position: "fixed",
+        left: adjustedPosition.x,
+        top: adjustedPosition.y,
+      }}
+      {...props}
+    >
+      {children}
+    </ul>
+  );
+}
+
+// --- Item ---
+
+function Item({
+  onSelect,
+  disabled = false,
+  children,
+  ...props
+}: ContextMenuItemProps & React.ComponentPropsWithoutRef<"li">) {
+  const { registerItem, closeMenu, setActiveIndex, items } =
+    useContextMenuContext();
+
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) registerItem(el);
+    },
+    [registerItem],
+  );
+
+  const handleClick = () => {
+    if (disabled) return;
+    onSelect?.();
+    closeMenu();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  return (
+    <li
+      ref={ref}
+      role="menuitem"
+      tabIndex={-1}
+      aria-disabled={disabled || undefined}
+      data-disabled={disabled || undefined}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        const idx = items.current.indexOf(
+          document.activeElement as HTMLElement,
+        );
+        if (idx !== -1) setActiveIndex(idx);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+// --- Separator ---
+
+function Separator(props: React.ComponentPropsWithoutRef<"li">) {
+  return <li role="separator" {...props} />;
+}
+
+export const ContextMenu = {
+  Root,
+  Trigger,
+  Content,
+  Item,
+  Separator,
+};
+```
+
+## Positioning at the Pointer
+
+The key differentiator of a ContextMenu is that it appears where the user right-clicked, not relative to a trigger button. This requires positioning with `position: fixed` using the `clientX` and `clientY` from the `contextmenu` event:
+
+```tsx
+style={{
+  position: "fixed",
+  left: position.x,
+  top: position.y,
+}}
+```
+
+### Viewport Boundary Clamping
+
+If the user right-clicks near the bottom-right corner of the viewport, the menu would overflow off-screen. The implementation must clamp the position to keep the menu fully visible:
+
+```tsx
+const clampPosition = (
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+) => {
+  const padding = 8; // Gap from viewport edge
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  return {
+    x: Math.min(Math.max(padding, x), vw - menuWidth - padding),
+    y: Math.min(Math.max(padding, y), vh - menuHeight - padding),
+  };
+};
+```
+
+<Callout type="tip">
+You need to measure the menu's rendered size before you can clamp it. Use a two-phase approach: render the menu at the raw position, measure it with `getBoundingClientRect()`, then adjust. This happens within a single frame, so users never see the menu in the wrong position.
+</Callout>
+
+## Touch Device Support
+
+On touch devices, there is no right-click. The equivalent is a **long press** — pressing and holding for approximately 500ms. Implementing this requires tracking `touchstart` and `touchend` events with a timer:
+
+```tsx
+const longPressTimeout = React.useRef<ReturnType<typeof setTimeout>>();
+
+const handleTouchStart = (e: React.TouchEvent) => {
+  const touch = e.touches[0];
+
+  longPressTimeout.current = setTimeout(() => {
+    e.preventDefault();
+    setPosition({ x: touch.clientX, y: touch.clientY });
+    setIsOpen(true);
+  }, 500);
+};
+
+const handleTouchEnd = () => {
+  clearTimeout(longPressTimeout.current);
+};
+
+const handleTouchMove = () => {
+  // Cancel if the user moves their finger (it's a scroll, not a long press)
+  clearTimeout(longPressTimeout.current);
+};
+```
+
+<Callout type="info">
+Cancel the long press timer on `touchmove` — if the user moves their finger, they are scrolling, not trying to open a context menu. False positives during scrolling are one of the most frustrating UX bugs on mobile.
+</Callout>
+
+## Focus Management
+
+When a ContextMenu opens, focus moves into the menu's first item. When it closes, focus should return to the element that was focused before the context menu opened — not necessarily the trigger area:
+
+```tsx
+const previousFocusRef = React.useRef<HTMLElement | null>(null);
+
+const handleContextMenu = (e: React.MouseEvent) => {
+  e.preventDefault();
+  previousFocusRef.current = document.activeElement as HTMLElement;
+  setPosition({ x: e.clientX, y: e.clientY });
+  setIsOpen(true);
+};
+
+const closeMenu = () => {
+  setIsOpen(false);
+  previousFocusRef.current?.focus();
+};
+```
+
+This subtle difference from regular Menu (which always returns focus to its trigger button) matters because the user may right-click on any element in the trigger area, and their focus should be preserved.
+
+## Preventing Native Context Menu Conflicts
+
+When implementing a custom context menu, you need to handle the case where the user right-clicks on the custom context menu itself:
+
+```tsx
+const handleContextMenuOnMenu = (e: React.MouseEvent) => {
+  e.preventDefault(); // Prevent native menu from appearing on top
+  // Optionally reposition the menu at the new click point
+};
+```
+
+## Keyboard Trigger Alternative
+
+Some users prefer keyboard access. The conventional keyboard shortcut for opening a context menu is `Shift + F10` on Windows or the dedicated context menu key:
+
+```tsx
+const handleKeyDown = (e: React.KeyboardEvent) => {
+  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+    e.preventDefault();
+    // Position near the focused element
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setPosition({ x: rect.left, y: rect.bottom });
+    setIsOpen(true);
+  }
+};
+```
+
+When triggered via keyboard, position the menu near the focused element rather than at an arbitrary point, since there are no pointer coordinates.
+
+## Styling Context Menus
+
+Context menus share the same styling as regular dropdown menus. The only difference is the positioning strategy:
+
+```css
+.context-menu-content {
+  position: fixed; /* Not absolute — relative to viewport */
+  z-index: 100;    /* Above other content */
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.context-menu-content [role="menuitem"]:focus-visible {
+  outline: none;
+  background: var(--color-accent-subtle);
+}
+```
+
+Use `position: fixed` (not `absolute`) because the menu position is relative to the viewport, not any parent container.
+
+## Key Takeaways
+
+1. **ContextMenu = right-click trigger + same menu pattern.** The ARIA structure inside the popup is identical to a regular Menu.
+2. **`e.preventDefault()` on `contextmenu`** suppresses the native browser menu.
+3. **`position: fixed`** with `clientX` / `clientY` places the menu at the pointer.
+4. **Viewport clamping** prevents the menu from overflowing off-screen edges.
+5. **Long press** (500ms) is the touch equivalent of right-click.
+6. **Focus restoration** should return to the previously focused element, not a specific trigger.
+7. **`Shift + F10`** provides keyboard access to the context menu.
+8. **Cancel long press on `touchmove`** to avoid conflicts with scrolling.
+
+## Try It Yourself
+
+<Exercise id="context-menu-basic" />

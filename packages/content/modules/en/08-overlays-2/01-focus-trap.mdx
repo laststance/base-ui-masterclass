@@ -1,0 +1,316 @@
+---
+title: "Focus Trapping Fundamentals"
+description: "Learn how focus trapping works with sentinel elements, the inert attribute, tab cycling, initial focus placement, and return focus."
+order: 1
+isFree: false
+---
+
+# Focus Trapping Fundamentals
+
+When a modal dialog opens, focus must stay **inside** the dialog. The user should not be able to tab into the page behind the overlay. This behavior is called a **focus trap**, and it is one of the most important accessibility patterns for overlay components.
+
+## Why Focus Trapping Matters
+
+Without a focus trap, a keyboard user can tab out of an open dialog into the page beneath the overlay. This creates a confusing experience:
+
+1. The user cannot see the focused element because the backdrop covers it.
+2. Screen readers announce elements that are visually hidden behind the modal.
+3. The user may accidentally activate controls they cannot see.
+
+The WAI-ARIA Authoring Practices explicitly state that dialogs with `aria-modal="true"` **must** constrain focus within the dialog.
+
+## The Focus Trap Lifecycle
+
+A focus trap follows a strict lifecycle:
+
+| Phase | Action |
+|-------|--------|
+| **Open** | Move focus to the first focusable element (or a designated initial focus target) |
+| **Active** | Constrain Tab/Shift+Tab cycling within the dialog |
+| **Close** | Return focus to the element that opened the dialog |
+
+Missing any phase creates an accessibility violation.
+
+## Tab Cycling with Sentinel Elements
+
+The most reliable technique for trapping focus uses **sentinel elements** — invisible focusable elements placed at the start and end of the dialog content.
+
+```
+[Sentinel Start] ← receives focus when Tab from last element
+  [First Focusable]
+  [Second Focusable]
+  ...
+  [Last Focusable]
+[Sentinel End] ← receives focus when Shift+Tab from first element
+```
+
+When focus reaches a sentinel, it wraps to the opposite end:
+
+```tsx
+function FocusTrap({ children }: { children: React.ReactNode }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const getFocusableElements = () => {
+    if (!containerRef.current) return [];
+    const selectors = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+    return Array.from(
+      containerRef.current.querySelectorAll<HTMLElement>(selectors),
+    );
+  };
+
+  const handleSentinelFocus = (position: "start" | "end") => {
+    const focusable = getFocusableElements();
+    if (focusable.length === 0) return;
+
+    if (position === "start") {
+      // Tabbing backward past the first element — wrap to last
+      focusable[focusable.length - 1].focus();
+    } else {
+      // Tabbing forward past the last element — wrap to first
+      focusable[0].focus();
+    }
+  };
+
+  return (
+    <>
+      <div tabIndex={0} onFocus={() => handleSentinelFocus("start")} />
+      <div ref={containerRef}>{children}</div>
+      <div tabIndex={0} onFocus={() => handleSentinelFocus("end")} />
+    </>
+  );
+}
+```
+
+### How Sentinels Work
+
+When the user presses `Tab` on the last focusable element inside the dialog, focus naturally moves to the next focusable element in the DOM — which is the **end sentinel**. The sentinel's `onFocus` handler immediately redirects focus to the first focusable element, creating a seamless loop.
+
+Similarly, pressing `Shift+Tab` on the first focusable element moves focus to the **start sentinel**, which redirects to the last focusable element.
+
+<Callout type="tip">
+Sentinel elements must have `tabIndex={0}` to be focusable, but they should be visually hidden. They need no visible content — their sole purpose is to catch focus and redirect it.
+</Callout>
+
+## The `inert` Attribute
+
+While sentinel elements handle tab cycling, they do not prevent screen readers from reading content outside the dialog. The **`inert`** attribute solves this by marking elements as inert — non-interactive and invisible to assistive technology.
+
+```tsx
+React.useEffect(() => {
+  if (!open) return;
+
+  // Mark everything outside the dialog as inert
+  const siblings = Array.from(document.body.children).filter(
+    (el) => el !== dialogRef.current?.parentElement,
+  );
+
+  siblings.forEach((el) => el.setAttribute("inert", ""));
+
+  return () => {
+    siblings.forEach((el) => el.removeAttribute("inert"));
+  };
+}, [open]);
+```
+
+When an element has the `inert` attribute:
+
+| Behavior | Effect |
+|----------|--------|
+| **Click** | Ignored — the element cannot be clicked |
+| **Focus** | Skipped — Tab will not stop on it |
+| **Screen reader** | Hidden — assistive tech ignores it |
+| **Text selection** | Prevented |
+
+<Callout type="info">
+The `inert` attribute is now supported in all modern browsers. It replaces the older pattern of setting `aria-hidden="true"` on sibling elements, which only hid content from screen readers but did not prevent focus or interaction.
+</Callout>
+
+## Initial Focus Placement
+
+When a dialog opens, focus should move to the most appropriate element:
+
+| Priority | Target | Example |
+|----------|--------|---------|
+| 1 | Explicit initial focus target | An `autoFocus` prop or `data-autofocus` attribute |
+| 2 | First interactive element | The first input field in a form dialog |
+| 3 | The dialog container itself | An informational dialog with no inputs |
+
+```tsx
+function useInitialFocus(
+  containerRef: React.RefObject<HTMLElement | null>,
+  open: boolean,
+) {
+  React.useEffect(() => {
+    if (!open || !containerRef.current) return;
+
+    // Priority 1: Element with data-autofocus
+    const autoFocusTarget =
+      containerRef.current.querySelector<HTMLElement>("[data-autofocus]");
+    if (autoFocusTarget) {
+      autoFocusTarget.focus();
+      return;
+    }
+
+    // Priority 2: First focusable element
+    const focusableSelectors = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    const firstFocusable =
+      containerRef.current.querySelector<HTMLElement>(focusableSelectors);
+    if (firstFocusable) {
+      firstFocusable.focus();
+      return;
+    }
+
+    // Priority 3: The container itself
+    containerRef.current.focus();
+  }, [open, containerRef]);
+}
+```
+
+<Callout type="warning">
+Never auto-focus a destructive action. In a confirmation dialog with "Cancel" and "Delete" buttons, focus should start on "Cancel" — the safe option. This prevents accidental data loss when the user presses Enter immediately after the dialog opens.
+</Callout>
+
+## Return Focus
+
+When the dialog closes, focus must return to the element that triggered the opening. This is typically the button that was clicked to open the dialog.
+
+```tsx
+function useReturnFocus(open: boolean) {
+  const triggerRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      // Capture the currently focused element before the dialog steals focus
+      triggerRef.current = document.activeElement as HTMLElement;
+    } else if (triggerRef.current) {
+      // Return focus when closing
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [open]);
+}
+```
+
+The pattern captures `document.activeElement` when the dialog opens (before focus moves into the dialog) and restores it when the dialog closes.
+
+## Scroll Lock
+
+When a modal dialog is open, the page behind it should not scroll. This prevents the disorienting experience of the background content moving while the user interacts with the dialog.
+
+```tsx
+React.useEffect(() => {
+  if (!open) return;
+
+  const scrollY = window.scrollY;
+  const originalOverflow = document.body.style.overflow;
+  const originalPosition = document.body.style.position;
+  const originalTop = document.body.style.top;
+  const originalWidth = document.body.style.width;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${scrollY}px`;
+  document.body.style.width = "100%";
+
+  return () => {
+    document.body.style.overflow = originalOverflow;
+    document.body.style.position = originalPosition;
+    document.body.style.top = originalTop;
+    document.body.style.width = originalWidth;
+    window.scrollTo(0, scrollY);
+  };
+}, [open]);
+```
+
+<Callout type="info">
+Setting `overflow: hidden` alone is not sufficient on iOS Safari. The `position: fixed` + `top` offset technique works across all platforms. The scroll position is saved before locking and restored after unlocking to prevent the page from jumping to the top.
+</Callout>
+
+## Combining Everything: `useFocusTrap` Hook
+
+A production-ready focus trap combines all four behaviors into a single hook:
+
+```tsx
+function useFocusTrap(open: boolean) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLElement | null>(null);
+
+  // Capture trigger element
+  React.useEffect(() => {
+    if (open) {
+      triggerRef.current = document.activeElement as HTMLElement;
+    }
+  }, [open]);
+
+  // Initial focus
+  useInitialFocus(containerRef, open);
+
+  // Mark siblings as inert
+  React.useEffect(() => {
+    if (!open || !containerRef.current) return;
+    const portal = containerRef.current.closest("[data-portal]");
+    const siblings = Array.from(document.body.children).filter(
+      (el) => el !== portal,
+    );
+    siblings.forEach((el) => el.setAttribute("inert", ""));
+    return () => siblings.forEach((el) => el.removeAttribute("inert"));
+  }, [open]);
+
+  // Return focus on close
+  React.useEffect(() => {
+    if (!open && triggerRef.current) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [open]);
+
+  return containerRef;
+}
+```
+
+## Testing Focus Traps
+
+Focus traps require specific testing strategies:
+
+```tsx
+test("focus stays within dialog on Tab", () => {
+  render(<Dialog open>
+    <input data-testid="first" />
+    <button data-testid="last">OK</button>
+  </Dialog>);
+
+  const first = screen.getByTestId("first");
+  const last = screen.getByTestId("last");
+
+  last.focus();
+  fireEvent.keyDown(last, { key: "Tab" });
+
+  // Focus should wrap to the first element
+  expect(document.activeElement).toBe(first);
+});
+```
+
+## Key Takeaways
+
+1. **Focus traps** constrain Tab/Shift+Tab cycling within a dialog.
+2. **Sentinel elements** at the start and end of the dialog catch focus and redirect it.
+3. **`inert`** hides content outside the dialog from all interaction and assistive technology.
+4. **Initial focus** should target the most appropriate element (never a destructive action).
+5. **Return focus** to the trigger element when the dialog closes.
+6. **Scroll lock** prevents the background from scrolling while the dialog is open.
+7. All four behaviors (sentinels, inert, initial focus, return focus) must work together.

@@ -1,0 +1,23 @@
+{
+  "id": "button-basic",
+  "title": {
+    "en": "Build a Headless Button",
+    "ja": "ヘッドレスボタンを構築する"
+  },
+  "difficulty": "beginner",
+  "module": "01-primitives",
+  "order": 1,
+  "hints": {
+    "en": [
+      "Start by spreading all props onto the <button> element",
+      "Use React.cloneElement() to render a custom element with the render prop",
+      "The data-disabled attribute should only appear when disabled is truthy"
+    ],
+    "ja": [
+      "まず全てのpropsを<button>要素にスプレッドしましょう",
+      "render propでカスタム要素をレンダリングするにはReact.cloneElement()を使います",
+      "data-disabled属性はdisabledがtruthyの時のみ表示されるべきです"
+    ]
+  },
+  "dependencies": {}
+}

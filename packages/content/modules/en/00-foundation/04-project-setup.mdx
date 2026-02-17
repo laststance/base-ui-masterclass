@@ -1,0 +1,382 @@
+---
+title: "Project Setup"
+description: "Set up the component library project you will build throughout this course — from npm init to TypeScript configuration to a clean file structure ready for development."
+order: 4
+isFree: true
+---
+
+# Project Setup
+
+In this lesson, you will set up the project that you will use for the rest of the course. By the end, you will have a fully configured TypeScript component library with a clean directory structure, ready to build your first headless component.
+
+## What We Are Building
+
+The project will be a **monorepo-style component library** with the following characteristics:
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Package manager | pnpm | Fast, disk-efficient, strict dependency resolution |
+| Language | TypeScript (strict mode) | Generics, inference, and type-safe APIs are essential for headless UI |
+| Build tool | tsup | Zero-config TypeScript bundler powered by esbuild |
+| Testing | Vitest + Testing Library | Fast unit tests with React DOM testing |
+| Linting | ESLint + Prettier | Consistent code style across all components |
+
+## Step 1 — Initialize the Project
+
+Create a new directory and initialize it with pnpm.
+
+```bash
+mkdir headless-ui-library
+cd headless-ui-library
+pnpm init
+```
+
+This creates a `package.json`. Update it with the following fields:
+
+```json
+{
+  "name": "@your-scope/headless-ui",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./accordion": {
+      "import": "./dist/accordion/index.js",
+      "types": "./dist/accordion/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}
+```
+
+> **Why `peerDependencies`?** A component library should not bundle React — the consumer's application already has it. Peer dependencies ensure a single copy of React is used at runtime.
+
+## Step 2 — Install Dependencies
+
+```bash
+# Core peer dependencies (installed as dev for local development)
+pnpm add -D react react-dom @types/react @types/react-dom
+
+# TypeScript
+pnpm add -D typescript
+
+# Build tool
+pnpm add -D tsup
+
+# Testing
+pnpm add -D vitest @testing-library/react @testing-library/jest-dom jsdom
+
+# Linting
+pnpm add -D eslint prettier eslint-config-prettier @typescript-eslint/parser @typescript-eslint/eslint-plugin
+```
+
+## Step 3 — TypeScript Configuration
+
+Create `tsconfig.json` in the project root:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]
+}
+```
+
+Key settings explained:
+
+| Option | Value | Purpose |
+|--------|-------|---------|
+| `strict: true` | Enables all strict checks | Catches type errors early, essential for a library |
+| `jsx: "react-jsx"` | React 17+ transform | No need to import React in every file |
+| `moduleResolution: "bundler"` | Modern resolution | Works with `exports` field in package.json |
+| `declaration: true` | Generates `.d.ts` files | Consumers get type information |
+| `declarationMap: true` | Maps declarations to source | "Go to definition" jumps to `.tsx` source, not `.d.ts` |
+
+## Step 4 — Build Configuration
+
+Create `tsup.config.ts`:
+
+```ts
+import { defineConfig } from "tsup";
+
+/**
+ * Build configuration for the component library.
+ * Produces ESM output with TypeScript declarations.
+ *
+ * @example
+ * pnpm build    # Single build
+ * pnpm dev      # Watch mode
+ */
+export default defineConfig({
+  entry: {
+    index: "src/index.ts",
+    "accordion/index": "src/accordion/index.ts",
+  },
+  format: ["esm"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  external: ["react", "react-dom"],
+  treeshake: true,
+});
+```
+
+As you build more components, you will add new entries to the `entry` object. Each component gets its own entry point so consumers can import only what they need:
+
+```tsx
+// Consumer imports only the Accordion — no other component code is included
+import { Accordion } from "@your-scope/headless-ui/accordion";
+```
+
+## Step 5 — Test Configuration
+
+Create `vitest.config.ts`:
+
+```ts
+import { defineConfig } from "vitest/config";
+import path from "node:path";
+
+/**
+ * Vitest configuration for component testing.
+ * Uses jsdom to simulate a browser environment.
+ *
+ * @example
+ * pnpm test        # Watch mode
+ * pnpm test:run    # Single run (CI)
+ */
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+});
+```
+
+Create the test setup file at `src/test-setup.ts`:
+
+```ts
+import "@testing-library/jest-dom/vitest";
+```
+
+This single import adds matchers like `toBeInTheDocument()`, `toHaveAttribute()`, and `toBeVisible()` to every test file.
+
+## Step 6 — Directory Structure
+
+Create the following directory structure:
+
+```
+headless-ui-library/
+├── src/
+│   ├── accordion/
+│   │   ├── accordion-context.ts
+│   │   ├── accordion-root.tsx
+│   │   ├── accordion-item.tsx
+│   │   ├── accordion-trigger.tsx
+│   │   ├── accordion-panel.tsx
+│   │   ├── accordion.test.tsx
+│   │   └── index.ts
+│   ├── utils/
+│   │   ├── use-controllable-state.ts
+│   │   ├── use-id.ts
+│   │   ├── compose-refs.ts
+│   │   └── index.ts
+│   ├── test-setup.ts
+│   └── index.ts
+├── tsconfig.json
+├── tsup.config.ts
+├── vitest.config.ts
+├── package.json
+└── .gitignore
+```
+
+Create the directories:
+
+```bash
+mkdir -p src/accordion src/utils
+```
+
+### The Root `src/index.ts`
+
+This file re-exports all components:
+
+```ts
+export { Accordion } from "./accordion";
+```
+
+### The Component `src/accordion/index.ts`
+
+Each component folder has its own barrel file:
+
+```ts
+export { Root } from "./accordion-root";
+export { Item } from "./accordion-item";
+export { Trigger } from "./accordion-trigger";
+export { Panel } from "./accordion-panel";
+
+// Namespace export for the Accordion.Root pattern
+import { Root } from "./accordion-root";
+import { Item } from "./accordion-item";
+import { Trigger } from "./accordion-trigger";
+import { Panel } from "./accordion-panel";
+
+export const Accordion = { Root, Item, Trigger, Panel };
+```
+
+## Step 7 — Shared Utilities
+
+Every component will need a few foundational hooks. Create these in `src/utils/`:
+
+### `use-controllable-state.ts`
+
+This hook is the backbone of every component — it supports both controlled and uncontrolled usage patterns.
+
+```tsx
+import * as React from "react";
+
+interface UseControllableStateParams<T> {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}
+
+/**
+ * Manages state that can be either controlled or uncontrolled.
+ * If `value` is provided, the component is controlled.
+ * Otherwise, internal state is used with `defaultValue`.
+ *
+ * @example
+ * const [isOpen, setIsOpen] = useControllableState({
+ *   value: props.open,
+ *   defaultValue: false,
+ *   onChange: props.onOpenChange,
+ * });
+ */
+export function useControllableState<T>({
+  value,
+  defaultValue,
+  onChange,
+}: UseControllableStateParams<T>): [T, (nextValue: T) => void] {
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+  const isControlled = value !== undefined;
+  const currentValue = isControlled ? value : internalValue;
+
+  const setValue = React.useCallback(
+    (nextValue: T) => {
+      if (!isControlled) {
+        setInternalValue(nextValue);
+      }
+      onChange?.(nextValue);
+    },
+    [isControlled, onChange]
+  );
+
+  return [currentValue, setValue];
+}
+```
+
+### `use-id.ts`
+
+Generates unique IDs for ARIA attributes:
+
+```tsx
+import * as React from "react";
+
+/**
+ * Generates a stable, unique ID for accessibility attributes.
+ * Uses React.useId (React 18+) internally.
+ *
+ * @example
+ * const triggerId = useId("accordion-trigger");
+ * // Returns something like "accordion-trigger-:r1:"
+ */
+export function useId(prefix: string): string {
+  const reactId = React.useId();
+  return `${prefix}-${reactId}`;
+}
+```
+
+## Step 8 — Verify the Setup
+
+Run the following commands to confirm everything works:
+
+```bash
+# TypeScript compiles without errors
+pnpm typecheck
+
+# Build produces output in dist/
+pnpm build
+
+# Tests pass (will report 0 tests until you write some)
+pnpm test:run
+```
+
+If all three commands succeed, your project is ready.
+
+## What Comes Next
+
+With this foundation in place, you are ready to build your first real component. In Module 1, we will start with the **Accordion** — implementing every feature we sketched in the compound components lesson, but with full accessibility, keyboard navigation, and controlled/uncontrolled support.
+
+Every component in the course will follow the same file structure:
+
+```
+src/{component-name}/
+├── {component-name}-context.ts    # Context definition
+├── {component-name}-root.tsx      # Root component
+├── {component-name}-{part}.tsx    # Subcomponents
+├── {component-name}.test.tsx      # Tests
+└── index.ts                       # Barrel export
+```
+
+This consistency makes the codebase predictable and easy to navigate, even as you add dozens of components.
+
+## Checklist
+
+Before proceeding to Module 1, confirm:
+
+- [ ] `pnpm typecheck` passes with zero errors
+- [ ] `pnpm build` produces files in `dist/`
+- [ ] `pnpm test:run` executes without crashes
+- [ ] The `src/accordion/` directory exists with placeholder files
+- [ ] The `src/utils/` directory contains `use-controllable-state.ts` and `use-id.ts`

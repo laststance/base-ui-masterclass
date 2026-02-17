@@ -1,0 +1,191 @@
+---
+title: "Building a Headless Separator"
+description: "Learn how to build a Separator component with proper semantic HTML, role='separator', aria-orientation, and decorative vs. semantic usage."
+order: 3
+isFree: false
+---
+
+# Building a Headless Separator
+
+The Separator is the simplest component in the entire library, but it teaches an important lesson: **semantic HTML and ARIA are not optional**. Even a horizontal line has accessibility implications.
+
+## When is a Line Not Just a Line?
+
+A visual divider can be:
+
+1. **Semantic** -- It separates distinct sections of content. Screen readers should announce it.
+2. **Decorative** -- It is purely visual. Screen readers should ignore it.
+
+The `role="separator"` attribute tells assistive technology that this element marks a boundary between sections.
+
+## Step 1: Define the Props
+
+```tsx
+import * as React from "react";
+
+interface SeparatorProps extends React.ComponentPropsWithoutRef<"div"> {
+  /**
+   * The orientation of the separator.
+   * @default "horizontal"
+   */
+  orientation?: "horizontal" | "vertical";
+  /**
+   * When true, the separator is purely decorative and
+   * will be hidden from assistive technology.
+   * @default false
+   */
+  decorative?: boolean;
+  /**
+   * Optional render prop for custom element rendering.
+   */
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLDivElement>;
+}
+```
+
+## Step 2: Implement the Component
+
+```tsx
+export function Separator({
+  orientation = "horizontal",
+  decorative = false,
+  render,
+  ref,
+  ...props
+}: SeparatorProps) {
+  // ARIA attributes
+  const ariaProps = decorative
+    ? { role: "none" as const }
+    : {
+        role: "separator" as const,
+        "aria-orientation": orientation,
+      };
+
+  // Data attributes for styling
+  const dataAttributes = {
+    "data-orientation": orientation,
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    ...ariaProps,
+    ...dataAttributes,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <div {...elementProps} />;
+}
+```
+
+### Key decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `role="separator"` | WAI-ARIA 1.2 defines this role for thematic breaks |
+| `role="none"` when decorative | Removes the element from the accessibility tree entirely |
+| `aria-orientation` | Tells screen readers whether content is split horizontally or vertically |
+| `data-orientation` | Gives CSS a hook to style horizontal vs. vertical |
+
+## Step 3: The `<hr>` Alternative
+
+HTML has a native separator element: `<hr>`. It implicitly has `role="separator"`. You could build the Separator around `<hr>` instead of `<div>`:
+
+```tsx
+export function Separator({
+  orientation = "horizontal",
+  decorative = false,
+  render,
+  ref,
+  ...props
+}: SeparatorProps) {
+  const ariaProps = decorative
+    ? { role: "none" as const, "aria-hidden": true as const }
+    : { "aria-orientation": orientation };
+
+  const elementProps = {
+    ...props,
+    ref,
+    ...ariaProps,
+    "data-orientation": orientation,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  // <hr> already has role="separator" implicitly
+  return <hr {...elementProps} />;
+}
+```
+
+The trade-off:
+
+| Element | Pros | Cons |
+|---------|------|------|
+| `<hr>` | Semantic by default, works without JS | Has default browser styles to reset |
+| `<div>` | No default styles | Requires explicit `role="separator"` |
+
+Base UI uses `<div>` with explicit role because it gives consumers a clean slate with no browser styles to override.
+
+## Step 4: Styling with Data Attributes
+
+```css
+.separator {
+  background-color: var(--color-border);
+}
+
+.separator[data-orientation="horizontal"] {
+  height: 1px;
+  width: 100%;
+}
+
+.separator[data-orientation="vertical"] {
+  width: 1px;
+  height: 100%;
+}
+```
+
+## Step 5: Usage Examples
+
+### Horizontal (default)
+
+```tsx
+<nav>
+  <a href="/home">Home</a>
+  <a href="/about">About</a>
+</nav>
+<Separator />
+<main>Content here</main>
+```
+
+### Vertical (inline)
+
+```tsx
+<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+  <span>Section A</span>
+  <Separator orientation="vertical" />
+  <span>Section B</span>
+</div>
+```
+
+### Decorative
+
+```tsx
+{/* This line is purely visual -- screen readers will skip it */}
+<Separator decorative />
+```
+
+## The Bigger Picture
+
+The Separator may seem trivial, but it establishes a pattern you will see in every component:
+
+1. **Semantic defaults** -- Components are accessible out of the box.
+2. **Escape hatches** -- The `decorative` prop lets consumers opt out when appropriate.
+3. **Data attributes** -- Every visual variant is driven by data, not class names.
+4. **Render prop** -- Any element can be the underlying node.
+
+With Button, Input, and Separator complete, you have mastered the **Primitives** module. Next, we move to Toggle and State -- where internal state management becomes the main challenge.

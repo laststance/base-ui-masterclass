@@ -1,0 +1,255 @@
+---
+title: "CSS Transition Strategies for Disclosure"
+description: "Master CSS transition techniques for disclosure components: the CSS grid trick, max-height approach, and a Transition component for exit animations."
+order: 3
+isFree: false
+---
+
+# CSS Transition Strategies for Disclosure
+
+Animating the open/close state of disclosure components is one of the most common UI challenges. The difficulty lies in animating to and from `auto` height, which CSS transitions do not natively support. In this lesson, we explore three approaches, each with different trade-offs.
+
+## Strategy 1: The CSS Grid Trick
+
+This is the modern, preferred approach. It works by exploiting CSS grid's `fr` unit, which can be transitioned.
+
+```css
+.content-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms ease-out;
+}
+
+.content-wrapper[data-state="open"] {
+  grid-template-rows: 1fr;
+}
+
+.content-inner {
+  overflow: hidden;
+}
+```
+
+```tsx
+<div className="content-wrapper" data-state={open ? "open" : "closed"}>
+  <div className="content-inner">
+    {children}
+  </div>
+</div>
+```
+
+### How It Works
+
+1. The outer container is a grid with a single row.
+2. `grid-template-rows: 0fr` makes the row's minimum height `0`, collapsing it.
+3. `grid-template-rows: 1fr` makes the row take its natural content height.
+4. CSS transitions animate the `grid-template-rows` property smoothly.
+5. The inner `<div>` with `overflow: hidden` clips content during the transition.
+
+### Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Pure CSS, no JavaScript measurement | Requires a wrapper `<div>` |
+| Animates to exact content height | Browser support: Chrome 107+, Firefox 66+, Safari 16+ |
+| Natural easing curve | Cannot use `hidden` attribute during animation |
+| No hardcoded values | Slightly more complex DOM structure |
+
+## Strategy 2: The max-height Approach
+
+Before the CSS grid trick, `max-height` was the go-to workaround:
+
+```css
+.content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 300ms ease-out;
+}
+
+.content[data-state="open"] {
+  max-height: 500px; /* Must be larger than actual content */
+}
+```
+
+### The Problem with max-height
+
+The fundamental issue is that you must guess a maximum value. This creates two problems:
+
+1. **If `max-height` is too small**, the content gets clipped.
+2. **If `max-height` is too large**, the easing curve feels wrong because the browser transitions from `500px` to the actual content height (say, `200px`) — the first `300px` of the transition happens instantly, and the visible animation only covers the last portion.
+
+```
+max-height: 500px → content is 200px
+
+Timeline: [=========|---visible animation---]
+          invisible    visible (only ~40%)
+```
+
+This creates a "delayed start" effect on open and a "premature end" on close that looks unpolished.
+
+### When to Use max-height
+
+Despite its drawbacks, `max-height` still has valid use cases:
+
+- When you know the content height will not exceed a specific value.
+- When supporting browsers older than Chrome 107 / Safari 16.
+- For simple tooltips or dropdowns with predictable content.
+
+## Strategy 3: Transition Component for Exit Animations
+
+The trickiest part of disclosure animation is the **exit transition**. When content closes, you need to:
+
+1. Start the close animation.
+2. Wait for the animation to complete.
+3. **Then** remove the content from the DOM (or set `hidden`).
+
+If you remove the content immediately, no animation plays. A Transition component solves this by tracking the animation lifecycle:
+
+```tsx
+type TransitionState = "entering" | "entered" | "exiting" | "exited";
+
+function useTransitionState(open: boolean, duration: number): TransitionState {
+  const [state, setState] = React.useState<TransitionState>(
+    open ? "entered" : "exited",
+  );
+
+  React.useEffect(() => {
+    if (open) {
+      setState("entering");
+      const raf = requestAnimationFrame(() => {
+        // Force a reflow, then transition to entered
+        setState("entered");
+      });
+      return () => cancelAnimationFrame(raf);
+    } else {
+      setState("exiting");
+      const timer = setTimeout(() => setState("exited"), duration);
+      return () => clearTimeout(timer);
+    }
+  }, [open, duration]);
+
+  return state;
+}
+```
+
+### Building the Transition Component
+
+```tsx
+interface TransitionProps {
+  open: boolean;
+  duration?: number;
+  children: (state: TransitionState) => React.ReactNode;
+}
+
+function Transition({ open, duration = 300, children }: TransitionProps) {
+  const state = useTransitionState(open, duration);
+
+  // Don't render when fully exited
+  if (state === "exited" && !open) return null;
+
+  return <>{children(state)}</>;
+}
+```
+
+Usage with disclosure content:
+
+```tsx
+<Transition open={isOpen} duration={300}>
+  {(state) => (
+    <div
+      className="panel"
+      style={{
+        transition: "opacity 300ms, transform 300ms",
+        opacity: state === "entered" ? 1 : 0,
+        transform: state === "entered" ? "translateY(0)" : "translateY(-8px)",
+      }}
+    >
+      {content}
+    </div>
+  )}
+</Transition>
+```
+
+### Transition Lifecycle
+
+```
+Open requested:  exited → entering → entered
+Close requested: entered → exiting → exited (after duration)
+```
+
+The key insight is that `exiting` keeps the element mounted while the CSS animation plays. Only after the `duration` elapses does the state change to `exited`, which unmounts the element.
+
+## Combining Strategies
+
+In practice, you often combine the CSS grid trick with the Transition component:
+
+- **CSS grid** handles the height animation.
+- **Transition** ensures the content stays mounted during the exit animation.
+
+```tsx
+function AnimatedPanel({ open, children }) {
+  const state = useTransitionState(open, 300);
+  const shouldMount = state !== "exited";
+
+  if (!shouldMount) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateRows: state === "entered" ? "1fr" : "0fr",
+        transition: "grid-template-rows 300ms ease",
+      }}
+    >
+      <div style={{ overflow: "hidden" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+## Respecting User Preferences
+
+Always respect the `prefers-reduced-motion` media query. Users who prefer reduced motion may experience discomfort, nausea, or seizures from animations:
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  .content-wrapper {
+    transition: none;
+  }
+}
+```
+
+In JavaScript, you can detect this preference:
+
+```tsx
+function usePrefersReducedMotion(): boolean {
+  return React.useSyncExternalStore(
+    (cb) => {
+      const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+      mql.addEventListener("change", cb);
+      return () => mql.removeEventListener("change", cb);
+    },
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    () => false, // SSR fallback
+  );
+}
+```
+
+## Comparison Table
+
+| Strategy | Animates to auto? | Exit animation? | Browser support | Complexity |
+|----------|------------------|-----------------|-----------------|------------|
+| CSS Grid trick | Yes | No (needs helper) | Modern | Low |
+| max-height | No (guessed value) | Yes (built-in) | All browsers | Low |
+| Transition component | Depends on CSS | Yes | All browsers | Medium |
+| Grid + Transition | Yes | Yes | Modern | Medium |
+
+## Key Takeaways
+
+1. **CSS grid trick** is the best approach for animating height to `auto` in modern browsers.
+2. **max-height** works everywhere but has easing curve problems due to the hardcoded value.
+3. **Transition component** solves the exit animation problem by delaying unmount.
+4. **Combine grid + Transition** for the best of both worlds.
+5. **Always respect `prefers-reduced-motion`** to ensure accessibility.
+6. **`requestAnimationFrame`** ensures the entering state triggers a CSS transition by forcing a repaint.

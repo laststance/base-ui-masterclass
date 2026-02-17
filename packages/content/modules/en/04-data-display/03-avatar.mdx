@@ -1,0 +1,261 @@
+---
+title: "Building an Avatar Component"
+description: "Learn how to build an Avatar component with a graceful image fallback chain: image, initials, and icon, using the AvatarImage + AvatarFallback compound pattern."
+order: 3
+isFree: false
+---
+
+# Building an Avatar Component
+
+An **Avatar** component displays a user representation — typically a profile photo, initials, or a generic icon. The challenge is not rendering an image; it is handling the **fallback chain** gracefully when the image fails to load or is unavailable.
+
+## The Fallback Chain
+
+A well-designed Avatar implements a three-tier fallback strategy:
+
+1. **Image** — The preferred representation. Load the user's profile photo.
+2. **Initials** — If the image fails or is not provided, show the user's initials.
+3. **Icon** — A generic person icon as the last resort.
+
+```
+Image (preferred)
+  └─ fails → Initials (derived from name)
+                └─ no name → Generic Icon (always available)
+```
+
+This chain must be invisible to the user. When the image loads successfully, show it immediately. When it fails, transition to the fallback without any flicker or layout shift.
+
+## Image Loading States
+
+Managing image loading is the core complexity of Avatar. An image can be in one of three states:
+
+| State | Description | What to Show |
+|-------|-------------|--------------|
+| `loading` | Image request in progress | Fallback (to avoid blank space) |
+| `loaded` | Image loaded successfully | The image |
+| `error` | Image failed to load | Fallback |
+
+We track this state with a custom hook:
+
+```tsx
+type ImageLoadingStatus = "loading" | "loaded" | "error";
+
+function useImageLoadingStatus(src: string | undefined): ImageLoadingStatus {
+  const [status, setStatus] = React.useState<ImageLoadingStatus>("loading");
+
+  React.useEffect(() => {
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+
+    setStatus("loading");
+    const img = new Image();
+    img.onload = () => setStatus("loaded");
+    img.onerror = () => setStatus("error");
+    img.src = src;
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [src]);
+
+  return status;
+}
+```
+
+## Compound Component Pattern: AvatarImage + AvatarFallback
+
+The Avatar uses the compound component pattern with three parts:
+
+- **`Avatar.Root`** — Container that provides loading status context.
+- **`Avatar.Image`** — Renders the `<img>` element only when loaded.
+- **`Avatar.Fallback`** — Renders only when the image is not loaded.
+
+This pattern gives consumers full control over what the fallback looks like:
+
+```tsx
+<Avatar.Root>
+  <Avatar.Image src={user.avatarUrl} alt={user.name} />
+  <Avatar.Fallback>
+    {user.name ? getInitials(user.name) : <PersonIcon />}
+  </Avatar.Fallback>
+</Avatar.Root>
+```
+
+## Delayed Fallback
+
+For users with fast connections, showing the fallback for a split second before the image loads creates an unpleasant flicker. We can add a `delayMs` prop to the Fallback component that prevents it from appearing until a timeout has elapsed:
+
+```tsx
+function Fallback({
+  delayMs = 0,
+  children,
+  ...props
+}: { delayMs?: number } & React.ComponentPropsWithoutRef<"span">) {
+  const { status } = useAvatarContext();
+  const [canRender, setCanRender] = React.useState(delayMs === 0);
+
+  React.useEffect(() => {
+    if (delayMs > 0) {
+      const timer = setTimeout(() => setCanRender(true), delayMs);
+      return () => clearTimeout(timer);
+    }
+  }, [delayMs]);
+
+  if (status === "loaded" || !canRender) return null;
+
+  return <span data-state="visible" {...props}>{children}</span>;
+}
+```
+
+With `delayMs={600}`, the fallback only appears after 600ms, giving the image enough time to load on reasonable connections.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+type ImageLoadingStatus = "loading" | "loaded" | "error";
+
+interface AvatarContextValue {
+  status: ImageLoadingStatus;
+}
+
+const AvatarContext = React.createContext<AvatarContextValue | null>(null);
+
+function useAvatarContext() {
+  const ctx = React.useContext(AvatarContext);
+  if (!ctx) throw new Error("Avatar sub-components must be used within Avatar.Root");
+  return ctx;
+}
+
+function useImageLoadingStatus(src: string | undefined): ImageLoadingStatus {
+  const [status, setStatus] = React.useState<ImageLoadingStatus>("loading");
+
+  React.useEffect(() => {
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+
+    setStatus("loading");
+    const img = new window.Image();
+    img.onload = () => setStatus("loaded");
+    img.onerror = () => setStatus("error");
+    img.src = src;
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [src]);
+
+  return status;
+}
+
+function Root({ children, ...props }: React.ComponentPropsWithoutRef<"span">) {
+  // Status is managed by AvatarImage, default to "error" so fallback shows when no Image is used
+  const [status, setStatus] = React.useState<ImageLoadingStatus>("error");
+
+  const ctx = React.useMemo(() => ({ status, setStatus }), [status]);
+
+  return (
+    <AvatarContext value={{ status }}>
+      <span data-state={status} {...props}>
+        {children}
+      </span>
+    </AvatarContext>
+  );
+}
+
+function AvatarImage({
+  src,
+  alt = "",
+  ...props
+}: React.ComponentPropsWithoutRef<"img">) {
+  const { status } = useAvatarContext();
+  const imageStatus = useImageLoadingStatus(src);
+
+  // Only render when the image has loaded
+  if (imageStatus !== "loaded") return null;
+
+  return <img src={src} alt={alt} data-state={imageStatus} {...props} />;
+}
+
+function Fallback({
+  delayMs = 0,
+  children,
+  ...props
+}: { delayMs?: number } & React.ComponentPropsWithoutRef<"span">) {
+  const { status } = useAvatarContext();
+  const [canRender, setCanRender] = React.useState(delayMs === 0);
+
+  React.useEffect(() => {
+    if (delayMs > 0) {
+      const timer = setTimeout(() => setCanRender(true), delayMs);
+      return () => clearTimeout(timer);
+    }
+  }, [delayMs]);
+
+  if (status === "loaded" || !canRender) return null;
+
+  return <span data-state="visible" {...props}>{children}</span>;
+}
+
+export const Avatar = { Root, Image: AvatarImage, Fallback };
+```
+
+## Generating Initials
+
+A small utility function to extract initials from a name:
+
+```tsx
+/**
+ * Extracts up to 2 initials from a full name.
+ * @param name - The user's display name
+ * @returns Uppercase initials string
+ * @example
+ * getInitials("John Doe")    // => "JD"
+ * getInitials("Alice")       // => "A"
+ * getInitials("Ana Maria C") // => "AC"
+ */
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+```
+
+## Accessibility Considerations
+
+- Always provide a meaningful `alt` attribute on `Avatar.Image`.
+- When showing initials, consider adding `aria-label` to the root so screen readers announce the full name instead of just the letters.
+- If the Avatar is purely decorative (e.g., next to the user's name), use `aria-hidden="true"` on the root to avoid redundant announcements.
+
+```tsx
+// Informative avatar (no adjacent name)
+<Avatar.Root aria-label="John Doe">
+  <Avatar.Image src="/john.jpg" alt="John Doe" />
+  <Avatar.Fallback>JD</Avatar.Fallback>
+</Avatar.Root>
+
+// Decorative avatar (name shown next to it)
+<div className="user-card">
+  <Avatar.Root aria-hidden="true">
+    <Avatar.Image src="/john.jpg" alt="" />
+    <Avatar.Fallback>JD</Avatar.Fallback>
+  </Avatar.Root>
+  <span>John Doe</span>
+</div>
+```
+
+## Key Takeaways
+
+1. **The fallback chain** (image, initials, icon) provides a graceful degradation path.
+2. **Track image loading status** with a custom hook using the `Image()` constructor.
+3. **AvatarImage renders only when loaded** to prevent broken image icons.
+4. **AvatarFallback supports `delayMs`** to avoid flickering on fast connections.
+5. **Compound components** give consumers control over both the image and fallback content.
+6. **Consider `aria-hidden`** for decorative avatars that appear alongside the user's name.

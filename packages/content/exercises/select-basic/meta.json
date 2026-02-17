@@ -1,0 +1,29 @@
+{
+  "id": "select-basic",
+  "title": {
+    "en": "Build a Select Component",
+    "ja": "Selectコンポーネントを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "09-selection",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Use React.useState for isOpen, selectedValue, and highlightedIndex — useRef for the options registry",
+      "The trigger button needs role='combobox', aria-haspopup='listbox', aria-expanded, and aria-controls",
+      "Keep DOM focus on the trigger button — use aria-activedescendant to communicate the highlighted option",
+      "ArrowDown/ArrowUp while closed should open the popup and highlight the first/last option",
+      "Enter/Space while open selects the highlighted option and closes the popup",
+      "Escape closes the popup without changing the selection, and returns focus to the trigger"
+    ],
+    "ja": [
+      "React.useStateでisOpen、selectedValue、highlightedIndexを、useRefでオプション登録を管理します",
+      "トリガーボタンにはrole='combobox'、aria-haspopup='listbox'、aria-expanded、aria-controlsが必要です",
+      "DOMフォーカスはトリガーボタンに保持し、aria-activedescendantでハイライトされたオプションを伝えます",
+      "閉じた状態でArrowDown/ArrowUpを押すとポップアップが開き、最初/最後のオプションがハイライトされます",
+      "開いた状態でEnter/Spaceを押すとハイライトされたオプションが選択されポップアップが閉じます",
+      "Escapeは選択を変更せずにポップアップを閉じ、フォーカスをトリガーに戻します"
+    ]
+  },
+  "dependencies": {}
+}

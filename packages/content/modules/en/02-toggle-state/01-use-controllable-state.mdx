@@ -1,0 +1,230 @@
+---
+title: "The useControllableState Hook"
+description: "Master the useControllableState pattern -- the foundation of every Base UI component that supports both controlled and uncontrolled usage modes."
+order: 1
+isFree: false
+---
+
+# The useControllableState Hook
+
+Every interactive Base UI component -- Switch, Checkbox, Toggle, Select, Dialog -- supports **both** controlled and uncontrolled usage. The `useControllableState` hook is the engine that makes this possible. It is arguably the most important utility in the entire library.
+
+## The Problem
+
+Consider a Switch component. A consumer might use it two ways:
+
+```tsx
+// Uncontrolled: the component manages its own state
+<Switch defaultChecked={false} />
+
+// Controlled: the parent manages the state
+<Switch checked={isOn} onCheckedChange={setIsOn} />
+```
+
+Without a shared abstraction, every component needs to duplicate the same conditional logic: "Am I controlled? Use the prop. Am I uncontrolled? Use internal state." This is error-prone and violates DRY.
+
+## The Solution: useControllableState
+
+```tsx
+function useControllableState<T>({
+  value,
+  defaultValue,
+  onChange,
+}: {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}): [T, (nextValue: T) => void] {
+  // ...
+}
+```
+
+The hook returns the same `[state, setState]` tuple as `useState`, but it automatically:
+
+1. Uses `value` when the component is **controlled** (value is not `undefined`)
+2. Uses internal state initialized from `defaultValue` when **uncontrolled**
+3. Calls `onChange` in both modes so the parent can react to changes
+
+## Step-by-Step Implementation
+
+### Step 1: Detect the Mode
+
+```tsx
+function useControllableState<T>({
+  value: controlledValue,
+  defaultValue,
+  onChange,
+}: {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}): [T, (nextValue: T) => void] {
+  const isControlled = controlledValue !== undefined;
+```
+
+The mode is determined by whether `value` is `undefined`. This is intentional -- it allows `null`, `false`, `0`, and `""` to be valid controlled values.
+
+### Step 2: Manage Internal State
+
+```tsx
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+
+  // The resolved value: controlled prop takes priority
+  const resolvedValue = isControlled ? controlledValue : internalValue;
+```
+
+### Step 3: Create a Unified Setter
+
+```tsx
+  const setValue = React.useCallback(
+    (nextValue: T) => {
+      if (!isControlled) {
+        setInternalValue(nextValue);
+      }
+      onChange?.(nextValue);
+    },
+    [isControlled, onChange],
+  );
+
+  return [resolvedValue, setValue];
+}
+```
+
+When controlled, we only call `onChange` -- the parent is responsible for updating the value. When uncontrolled, we update internal state **and** call `onChange` so the parent can still observe changes if desired.
+
+## The Complete Hook
+
+```tsx
+import * as React from "react";
+
+/**
+ * Manages state that can be either controlled or uncontrolled.
+ *
+ * When `value` is provided (not undefined), the component is controlled
+ * and the parent owns the state. When `value` is undefined, the component
+ * manages its own state internally, initialized from `defaultValue`.
+ *
+ * @param options.value - Controlled value (undefined = uncontrolled mode)
+ * @param options.defaultValue - Initial value for uncontrolled mode
+ * @param options.onChange - Callback fired when the value changes (both modes)
+ * @returns A [value, setValue] tuple identical to React.useState
+ *
+ * @example
+ * // Inside a Switch component:
+ * const [checked, setChecked] = useControllableState({
+ *   value: props.checked,
+ *   defaultValue: props.defaultChecked ?? false,
+ *   onChange: props.onCheckedChange,
+ * });
+ */
+function useControllableState<T>({
+  value: controlledValue,
+  defaultValue,
+  onChange,
+}: {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}): [T, (nextValue: T) => void] {
+  const isControlled = controlledValue !== undefined;
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+
+  const resolvedValue = isControlled ? controlledValue : internalValue;
+
+  const setValue = React.useCallback(
+    (nextValue: T) => {
+      if (!isControlled) {
+        setInternalValue(nextValue);
+      }
+      onChange?.(nextValue);
+    },
+    [isControlled, onChange],
+  );
+
+  return [resolvedValue, setValue];
+}
+```
+
+## Edge Cases and Pitfalls
+
+### 1. Switching Between Controlled and Uncontrolled
+
+React warns when a component switches from controlled to uncontrolled (or vice versa) during its lifetime. You can add a development-only warning:
+
+```tsx
+if (process.env.NODE_ENV !== "production") {
+  const wasControlled = React.useRef(isControlled);
+  React.useEffect(() => {
+    if (wasControlled.current !== isControlled) {
+      console.warn(
+        "A component changed from " +
+          (wasControlled.current ? "controlled" : "uncontrolled") +
+          " to " +
+          (isControlled ? "controlled" : "uncontrolled") +
+          ". This is not supported.",
+      );
+    }
+  });
+}
+```
+
+### 2. Callback Identity
+
+The `onChange` callback might not be memoized by the consumer. Wrapping `setValue` in `useCallback` with `onChange` in the dependency array means the setter identity changes when `onChange` changes. In performance-sensitive cases, use a ref:
+
+```tsx
+const onChangeRef = React.useRef(onChange);
+onChangeRef.current = onChange;
+
+const setValue = React.useCallback(
+  (nextValue: T) => {
+    if (!isControlled) {
+      setInternalValue(nextValue);
+    }
+    onChangeRef.current?.(nextValue);
+  },
+  [isControlled],
+);
+```
+
+### 3. defaultValue Changes After Mount
+
+Just like `useState`, the `defaultValue` parameter is only used on the initial render. Changing it after mount has no effect. This is expected and matches React's behavior.
+
+## Using It in Components
+
+Here is a preview of how Switch uses this hook (covered in the next lesson):
+
+```tsx
+function Switch({ checked, defaultChecked, onCheckedChange, ...props }) {
+  const [isChecked, setChecked] = useControllableState({
+    value: checked,
+    defaultValue: defaultChecked ?? false,
+    onChange: onCheckedChange,
+  });
+
+  return (
+    <button
+      role="switch"
+      aria-checked={isChecked}
+      onClick={() => setChecked(!isChecked)}
+      {...props}
+    />
+  );
+}
+```
+
+The component code is clean and does not care whether it is controlled or not. The hook handles everything.
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| Controlled vs. uncontrolled | Detected by `value !== undefined` |
+| Internal state | Only updated in uncontrolled mode |
+| Unified setter | Calls `onChange` in both modes |
+| Edge cases | Mode switching warning, callback refs, defaultValue semantics |
+
+This hook is the backbone of the library. Every component from Switch to Dialog will use it. Build it correctly here, and the rest follows naturally.
+
+<Exercise id="use-controllable-state" />

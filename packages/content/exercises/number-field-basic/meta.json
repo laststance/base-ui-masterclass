@@ -1,0 +1,29 @@
+{
+  "id": "number-field-basic",
+  "title": {
+    "en": "Build a NumberField Component",
+    "ja": "NumberFieldコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "11-advanced",
+  "order": 1,
+  "hints": {
+    "en": [
+      "Use role='spinbutton' on the input element, not on the root container",
+      "Set aria-valuenow, aria-valuemin, and aria-valuemax on the spinbutton input",
+      "Clamp the value within min/max bounds using Math.min(Math.max(value, min), max)",
+      "Handle ArrowUp/ArrowDown keydown events on the input to increment/decrement by step",
+      "Home and End keys should set the value to min and max respectively",
+      "Disable the increment button when value >= max and decrement button when value <= min"
+    ],
+    "ja": [
+      "role='spinbutton'はルートコンテナではなくinput要素に設定します",
+      "spinbutton inputにaria-valuenow、aria-valuemin、aria-valuemaxを設定します",
+      "Math.min(Math.max(value, min), max)で値をmin/max範囲内にクランプします",
+      "inputのArrowUp/ArrowDownキーダウンイベントでstep分の増減を処理します",
+      "HomeキーとEndキーでそれぞれminとmaxに値を設定します",
+      "value >= maxの時にインクリメントボタンを、value <= minの時にデクリメントボタンを無効化します"
+    ]
+  },
+  "dependencies": {}
+}

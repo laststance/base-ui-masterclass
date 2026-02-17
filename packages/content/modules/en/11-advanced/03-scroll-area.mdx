@@ -1,0 +1,337 @@
+---
+title: "Building a ScrollArea Component"
+description: "Learn how to build a custom ScrollArea with a styled scrollbar, viewport overflow management, thumb sizing from content ratio, and drag-to-scroll interaction."
+order: 3
+isFree: false
+---
+
+# Building a ScrollArea Component
+
+A **ScrollArea** replaces the browser's native scrollbar with a custom-styled one while preserving the underlying scroll behavior. Native scrollbars look different across operating systems and cannot be styled consistently. A headless ScrollArea gives you full visual control while maintaining smooth scrolling, accessibility, and keyboard navigation.
+
+## Why Custom Scrollbars?
+
+Native scrollbar styling has serious limitations:
+
+| Browser | Scrollbar Styling Support |
+|---------|--------------------------|
+| Chrome/Safari | `::-webkit-scrollbar` pseudo-elements (non-standard) |
+| Firefox | `scrollbar-width` and `scrollbar-color` (limited) |
+| iOS Safari | Scrollbars auto-hide and cannot be styled |
+
+The result is a fractured styling story. A headless ScrollArea sidesteps this by hiding the native scrollbar and rendering a custom one that you fully control with CSS.
+
+## Architecture Overview
+
+The ScrollArea consists of four parts:
+
+- **`ScrollArea.Root`** — The outer container that sets up dimensions and context.
+- **`ScrollArea.Viewport`** — The scrollable content container with `overflow: scroll` and hidden native scrollbars.
+- **`ScrollArea.Scrollbar`** — The custom scrollbar track, positioned alongside the viewport.
+- **`ScrollArea.Thumb`** — The draggable handle within the scrollbar, sized proportionally to the content ratio.
+
+<Callout type="info">
+The key insight is that we are not reimplementing scrolling. The viewport uses native `overflow: scroll`. We simply observe the scroll position and mirror it onto a custom scrollbar UI.
+</Callout>
+
+## Hiding the Native Scrollbar
+
+We hide the native scrollbar by setting `overflow: scroll` on the viewport but pushing the scrollbar offscreen with negative margin and padding:
+
+```css
+.scroll-area-viewport {
+  overflow: scroll;
+  scrollbar-width: none; /* Firefox */
+}
+
+.scroll-area-viewport::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+```
+
+Alternatively, some implementations use a wrapper div with `overflow: hidden` and the viewport slightly wider than the wrapper, pushing the scrollbar behind the overflow boundary. The CSS approach above is simpler and works well in modern browsers.
+
+## Thumb Sizing from Content Ratio
+
+The thumb size should reflect the ratio between the visible viewport and the total scrollable content:
+
+```tsx
+function calculateThumbSize(
+  viewportSize: number,
+  contentSize: number,
+  trackSize: number,
+): number {
+  const ratio = viewportSize / contentSize;
+  const thumbSize = Math.max(ratio * trackSize, 20); // Minimum 20px for usability
+  return thumbSize;
+}
+```
+
+If the viewport is 400px tall and the content is 1600px tall, the ratio is 0.25, so the thumb occupies 25% of the scrollbar track. We enforce a minimum size (20px) so the thumb remains clickable even for extremely long content.
+
+## Scroll Position to Thumb Position
+
+The thumb position within the track mirrors the scroll position within the content:
+
+```tsx
+function calculateThumbPosition(
+  scrollTop: number,
+  contentSize: number,
+  viewportSize: number,
+  trackSize: number,
+  thumbSize: number,
+): number {
+  const scrollableDistance = contentSize - viewportSize;
+  if (scrollableDistance <= 0) return 0;
+  const scrollRatio = scrollTop / scrollableDistance;
+  return scrollRatio * (trackSize - thumbSize);
+}
+```
+
+## Drag-to-Scroll
+
+When the user drags the thumb, we reverse the calculation to convert thumb position back to scroll position:
+
+```tsx
+function handleThumbDrag(
+  pointerY: number,
+  trackRect: DOMRect,
+  thumbSize: number,
+  contentSize: number,
+  viewportSize: number,
+) {
+  const trackSize = trackRect.height;
+  const thumbPosition = pointerY - trackRect.top - thumbSize / 2;
+  const scrollableTrack = trackSize - thumbSize;
+  const scrollRatio = Math.max(0, Math.min(thumbPosition / scrollableTrack, 1));
+  const scrollTop = scrollRatio * (contentSize - viewportSize);
+  return scrollTop;
+}
+```
+
+<Callout type="warning">
+When dragging the thumb, always use `setPointerCapture` (just like the Slider). Without it, fast drags will break when the cursor leaves the scrollbar area.
+</Callout>
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+interface ScrollAreaContextValue {
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+  thumbRef: React.RefObject<HTMLDivElement | null>;
+  scrollbarRef: React.RefObject<HTMLDivElement | null>;
+  thumbSize: number;
+  thumbPosition: number;
+  isScrollable: boolean;
+}
+
+const ScrollAreaContext = React.createContext<ScrollAreaContextValue | null>(null);
+
+function useScrollAreaContext() {
+  const ctx = React.useContext(ScrollAreaContext);
+  if (!ctx) throw new Error("ScrollArea sub-components must be used within ScrollArea.Root");
+  return ctx;
+}
+
+function Root({ children, ...props }: React.ComponentPropsWithoutRef<"div">) {
+  const viewportRef = React.useRef<HTMLDivElement>(null);
+  const thumbRef = React.useRef<HTMLDivElement>(null);
+  const scrollbarRef = React.useRef<HTMLDivElement>(null);
+
+  const [thumbSize, setThumbSize] = React.useState(0);
+  const [thumbPosition, setThumbPosition] = React.useState(0);
+  const [isScrollable, setIsScrollable] = React.useState(false);
+
+  const updateScrollbar = React.useCallback(() => {
+    const viewport = viewportRef.current;
+    const scrollbar = scrollbarRef.current;
+    if (!viewport || !scrollbar) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
+    const trackHeight = scrollbar.clientHeight;
+
+    const hasOverflow = scrollHeight > clientHeight;
+    setIsScrollable(hasOverflow);
+
+    if (!hasOverflow) return;
+
+    const ratio = clientHeight / scrollHeight;
+    const newThumbSize = Math.max(ratio * trackHeight, 20);
+    setThumbSize(newThumbSize);
+
+    const scrollableDistance = scrollHeight - clientHeight;
+    const scrollRatio = scrollableDistance > 0 ? scrollTop / scrollableDistance : 0;
+    setThumbPosition(scrollRatio * (trackHeight - newThumbSize));
+  }, []);
+
+  React.useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    updateScrollbar();
+    viewport.addEventListener("scroll", updateScrollbar, { passive: true });
+
+    const observer = new ResizeObserver(updateScrollbar);
+    observer.observe(viewport);
+
+    return () => {
+      viewport.removeEventListener("scroll", updateScrollbar);
+      observer.disconnect();
+    };
+  }, [updateScrollbar]);
+
+  const ctx = React.useMemo(
+    () => ({ viewportRef, thumbRef, scrollbarRef, thumbSize, thumbPosition, isScrollable }),
+    [thumbSize, thumbPosition, isScrollable],
+  );
+
+  return (
+    <ScrollAreaContext value={ctx}>
+      <div style={{ position: "relative", overflow: "hidden" }} {...props}>
+        {children}
+      </div>
+    </ScrollAreaContext>
+  );
+}
+
+function Viewport({ children, ...props }: React.ComponentPropsWithoutRef<"div">) {
+  const { viewportRef } = useScrollAreaContext();
+
+  return (
+    <div
+      ref={viewportRef}
+      style={{
+        overflow: "scroll",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
+        width: "100%",
+        height: "100%",
+      }}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Scrollbar({ children, ...props }: React.ComponentPropsWithoutRef<"div">) {
+  const { scrollbarRef, viewportRef, thumbSize, isScrollable } = useScrollAreaContext();
+
+  const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    const scrollbar = scrollbarRef.current;
+    if (!viewport || !scrollbar) return;
+    if (e.target !== e.currentTarget) return;
+
+    const trackRect = scrollbar.getBoundingClientRect();
+    const clickPosition = e.clientY - trackRect.top;
+    const trackHeight = trackRect.height;
+    const scrollRatio = clickPosition / trackHeight;
+    viewport.scrollTop = scrollRatio * (viewport.scrollHeight - viewport.clientHeight);
+  };
+
+  if (!isScrollable) return null;
+
+  return (
+    <div
+      ref={scrollbarRef}
+      role="scrollbar"
+      aria-controls={undefined}
+      aria-orientation="vertical"
+      aria-valuenow={undefined}
+      onClick={handleTrackClick}
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        width: 8,
+        height: "100%",
+      }}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Thumb(props: React.ComponentPropsWithoutRef<"div">) {
+  const { thumbRef, viewportRef, scrollbarRef, thumbSize, thumbPosition } = useScrollAreaContext();
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+
+    const viewport = viewportRef.current;
+    const scrollbar = scrollbarRef.current;
+    if (!viewport || !scrollbar) return;
+
+    const trackRect = scrollbar.getBoundingClientRect();
+    const trackHeight = trackRect.height;
+    const thumbPos = e.clientY - trackRect.top - thumbSize / 2;
+    const scrollableTrack = trackHeight - thumbSize;
+    const scrollRatio = Math.max(0, Math.min(thumbPos / scrollableTrack, 1));
+    viewport.scrollTop = scrollRatio * (viewport.scrollHeight - viewport.clientHeight);
+  };
+
+  return (
+    <div
+      ref={thumbRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      style={{
+        position: "absolute",
+        top: thumbPosition,
+        width: "100%",
+        height: thumbSize,
+        borderRadius: 4,
+        cursor: "grab",
+      }}
+      {...props}
+    />
+  );
+}
+
+export const ScrollArea = { Root, Viewport, Scrollbar, Thumb };
+```
+
+## ResizeObserver for Dynamic Content
+
+Content can change size dynamically (accordion panels opening, lazy-loaded images, etc.). We use a `ResizeObserver` on the viewport to recalculate thumb size and position whenever the scrollable content dimensions change:
+
+```tsx
+const observer = new ResizeObserver(updateScrollbar);
+observer.observe(viewport);
+```
+
+This ensures the scrollbar stays in sync even when the content grows or shrinks after initial render.
+
+## Accessibility Considerations
+
+Custom scrollbars raise accessibility concerns:
+
+- **Keyboard scrolling still works**: Because the viewport uses native `overflow: scroll`, keyboard users can scroll with arrow keys, Page Up/Down, and Space.
+- **The custom scrollbar is decorative**: It mirrors the native scrollbar behavior. Screen readers interact with the scrollable content directly, not with our custom scrollbar.
+- **Focus management**: The viewport content receives focus naturally. The custom thumb is an optional pointer target, not a keyboard-focusable element.
+
+<Callout type="tip">
+Consider auto-hiding the scrollbar after a period of inactivity, similar to macOS behavior. Use a CSS `opacity` transition triggered by a `data-scrolling` attribute that you toggle via a debounced scroll event handler.
+</Callout>
+
+## Key Takeaways
+
+1. **Do not reimplement scrolling**: Use native `overflow: scroll` on the viewport and observe its state.
+2. **Hide native scrollbars** with `scrollbar-width: none` and `::-webkit-scrollbar { display: none }`.
+3. **Size the thumb proportionally** to the viewport/content ratio with a sensible minimum (20px).
+4. **Convert scroll position to thumb position** and vice versa for drag-to-scroll.
+5. **Use `setPointerCapture`** for smooth thumb dragging.
+6. **Use ResizeObserver** to keep the scrollbar in sync with dynamic content.
+
+## Try It Yourself
+
+<Exercise id="scroll-area-basic" />

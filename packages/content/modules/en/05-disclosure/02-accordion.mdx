@@ -1,0 +1,305 @@
+---
+title: "Building an Accordion Component"
+description: "Learn how to build an Accordion from Collapsible components, supporting single and multiple expand modes with compound components."
+order: 2
+isFree: false
+---
+
+# Building an Accordion Component
+
+An **Accordion** is a vertically stacked set of collapsible sections. While each section behaves like a Collapsible, the Accordion adds coordination logic: should only one section be open at a time, or can multiple sections expand simultaneously? This is where compound components truly shine.
+
+## Anatomy of an Accordion
+
+The Accordion is composed of four compound components:
+
+| Component | Role | Renders |
+|-----------|------|---------|
+| `Accordion.Root` | Manages which items are expanded | `<div>` |
+| `Accordion.Item` | Wraps a single collapsible section | `<div>` |
+| `Accordion.Trigger` | Heading button that toggles the item | `<h3><button>` |
+| `Accordion.Panel` | The expandable content region | `<div>` |
+
+```tsx
+<Accordion.Root type="single" defaultValue="item-1">
+  <Accordion.Item value="item-1">
+    <Accordion.Trigger>Section 1</Accordion.Trigger>
+    <Accordion.Panel>Content 1</Accordion.Panel>
+  </Accordion.Item>
+  <Accordion.Item value="item-2">
+    <Accordion.Trigger>Section 2</Accordion.Trigger>
+    <Accordion.Panel>Content 2</Accordion.Panel>
+  </Accordion.Item>
+</Accordion.Root>
+```
+
+## Single vs. Multiple Expand
+
+The `type` prop determines the expansion behavior:
+
+| Type | Behavior | Value Type | Example |
+|------|----------|------------|---------|
+| `"single"` | Only one item open at a time | `string` | FAQ page |
+| `"multiple"` | Any number of items can be open | `string[]` | Settings panel |
+
+In single mode, opening a new item automatically closes the previously open one. In multiple mode, each item toggles independently.
+
+```tsx
+// Single expand — FAQ style
+<Accordion.Root type="single" defaultValue="q1">
+
+// Multiple expand — settings panel
+<Accordion.Root type="multiple" defaultValue={["general", "appearance"]}>
+```
+
+## Two-Level Context Architecture
+
+The Accordion uses two nested contexts:
+
+1. **AccordionContext** — Provided by `Root`, manages the set of expanded values.
+2. **AccordionItemContext** — Provided by `Item`, holds the item's value and computed open state.
+
+```tsx
+interface AccordionContextValue {
+  type: "single" | "multiple";
+  expandedValues: Set<string>;
+  toggle: (value: string) => void;
+}
+
+interface AccordionItemContextValue {
+  value: string;
+  open: boolean;
+  triggerId: string;
+  panelId: string;
+}
+```
+
+This two-level design keeps `Trigger` and `Panel` decoupled from the root's expansion logic. They only need to know their own item's state.
+
+## ARIA Attributes
+
+The WAI-ARIA Accordion pattern specifies precise roles and relationships:
+
+| Element | Attributes |
+|---------|-----------|
+| Trigger (`<button>`) | `aria-expanded`, `aria-controls` pointing to panel ID |
+| Trigger wrapper (`<h3>`) | Heading level for document outline |
+| Panel (`<div>`) | `role="region"`, `aria-labelledby` pointing to trigger ID |
+
+The heading wrapper is important for screen reader navigation. Users can jump between accordion headers using heading shortcuts (e.g., `H` key in NVDA/JAWS).
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+// --- Root ---
+
+interface AccordionSingleProps {
+  type: "single";
+  value?: string;
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+  collapsible?: boolean; // Allow closing all items in single mode
+}
+
+interface AccordionMultipleProps {
+  type: "multiple";
+  value?: string[];
+  defaultValue?: string[];
+  onValueChange?: (value: string[]) => void;
+}
+
+type AccordionProps = (AccordionSingleProps | AccordionMultipleProps) &
+  React.ComponentPropsWithoutRef<"div">;
+
+interface AccordionContextValue {
+  expandedValues: Set<string>;
+  toggle: (value: string) => void;
+}
+
+const AccordionContext = React.createContext<AccordionContextValue | null>(null);
+
+function useAccordionContext() {
+  const ctx = React.useContext(AccordionContext);
+  if (!ctx) throw new Error("Accordion sub-components must be used within Accordion.Root");
+  return ctx;
+}
+
+function Root({ type, children, ...props }: AccordionProps) {
+  // Simplified: managing internal state for demonstration
+  const [expanded, setExpanded] = React.useState<Set<string>>(() => {
+    if (type === "single") {
+      const def = (props as AccordionSingleProps).defaultValue;
+      return def ? new Set([def]) : new Set();
+    }
+    const def = (props as AccordionMultipleProps).defaultValue;
+    return new Set(def ?? []);
+  });
+
+  const toggle = React.useCallback(
+    (value: string) => {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(value)) {
+          next.delete(value);
+        } else {
+          if (type === "single") next.clear();
+          next.add(value);
+        }
+        return next;
+      });
+    },
+    [type],
+  );
+
+  const ctx = React.useMemo(() => ({ expandedValues: expanded, toggle }), [expanded, toggle]);
+
+  return (
+    <AccordionContext value={ctx}>
+      <div data-orientation="vertical" {...props}>
+        {children}
+      </div>
+    </AccordionContext>
+  );
+}
+
+// --- Item ---
+
+interface AccordionItemContextValue {
+  value: string;
+  open: boolean;
+  triggerId: string;
+  panelId: string;
+}
+
+const AccordionItemContext = React.createContext<AccordionItemContextValue | null>(null);
+
+function useAccordionItemContext() {
+  const ctx = React.useContext(AccordionItemContext);
+  if (!ctx) throw new Error("Accordion.Trigger/Panel must be used within Accordion.Item");
+  return ctx;
+}
+
+function Item({
+  value,
+  children,
+  ...props
+}: { value: string } & React.ComponentPropsWithoutRef<"div">) {
+  const { expandedValues } = useAccordionContext();
+  const open = expandedValues.has(value);
+  const id = React.useId();
+  const triggerId = `${id}-trigger`;
+  const panelId = `${id}-panel`;
+
+  const ctx = React.useMemo(
+    () => ({ value, open, triggerId, panelId }),
+    [value, open, triggerId, panelId],
+  );
+
+  return (
+    <AccordionItemContext value={ctx}>
+      <div data-state={open ? "open" : "closed"} {...props}>
+        {children}
+      </div>
+    </AccordionItemContext>
+  );
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { toggle } = useAccordionContext();
+  const { value, open, triggerId, panelId } = useAccordionItemContext();
+
+  return (
+    <h3 style={{ margin: 0 }}>
+      <button
+        type="button"
+        id={triggerId}
+        aria-expanded={open}
+        aria-controls={panelId}
+        data-state={open ? "open" : "closed"}
+        onClick={() => toggle(value)}
+        {...props}
+      >
+        {children}
+      </button>
+    </h3>
+  );
+}
+
+// --- Panel ---
+
+function Panel({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, triggerId, panelId } = useAccordionItemContext();
+
+  return (
+    <div
+      id={panelId}
+      role="region"
+      aria-labelledby={triggerId}
+      data-state={open ? "open" : "closed"}
+      hidden={!open}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export const Accordion = { Root, Item, Trigger, Panel };
+```
+
+## Keyboard Navigation
+
+The WAI-ARIA Accordion pattern defines keyboard interactions between triggers:
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `Space` | Toggle the focused trigger |
+| `ArrowDown` | Move focus to the next trigger |
+| `ArrowUp` | Move focus to the previous trigger |
+| `Home` | Move focus to the first trigger |
+| `End` | Move focus to the last trigger |
+
+Arrow key navigation between triggers requires collecting all trigger elements within the root and managing focus programmatically. This is similar to the roving tabindex pattern we will explore in Module 6.
+
+## Animating Accordion Panels
+
+The CSS grid animation trick from the Collapsible lesson works perfectly here:
+
+```css
+.accordion-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms ease;
+}
+
+.accordion-panel[data-state="open"] {
+  grid-template-rows: 1fr;
+}
+
+.accordion-panel > div {
+  overflow: hidden;
+}
+```
+
+## Key Takeaways
+
+1. **Two-level context** separates root-level expansion logic from item-level state.
+2. **`type="single"` vs `type="multiple"`** controls whether one or many items can be open.
+3. **Discriminated union types** for props ensure type safety between single and multiple modes.
+4. **Heading wrappers** around triggers improve screen reader navigation.
+5. **`aria-labelledby`** on panels creates a relationship between the panel and its trigger.
+6. **Each Item gets a unique value** used to track expansion state in a Set.
+
+## Try It Yourself
+
+<Exercise id="accordion-basic" />

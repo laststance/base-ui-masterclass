@@ -1,0 +1,332 @@
+---
+title: "Documentation with Storybook"
+description: "Learn how to document your component library with Storybook, including story-per-component architecture, controls addon, a11y addon, visual regression testing, and MDX docs."
+order: 2
+isFree: false
+---
+
+# Documentation with Storybook
+
+A component library without documentation is a component library nobody uses. **Storybook** is the industry-standard tool for developing, documenting, and testing UI components in isolation. It provides a dedicated environment where each component can be rendered with various props, tested for accessibility, and documented with interactive examples.
+
+## Why Storybook?
+
+| Benefit | Description |
+|---------|-------------|
+| **Isolated development** | Develop components outside your app, with no routing or state management overhead |
+| **Living documentation** | Stories serve as both docs and executable examples |
+| **Addon ecosystem** | Accessibility testing, visual regression, controls, responsive viewports |
+| **Framework agnostic** | Works with React, Vue, Svelte, Angular, and more |
+| **MDX support** | Write long-form documentation alongside interactive stories |
+
+## Setting Up Storybook
+
+Initialize Storybook in your project:
+
+```bash
+pnpm dlx storybook@latest init
+```
+
+This generates a `.storybook/` directory with configuration files and example stories. For a component library, configure the stories path to point at your source:
+
+```tsx
+// .storybook/main.ts
+import type { StorybookConfig } from "@storybook/react-vite";
+
+const config: StorybookConfig = {
+  stories: ["../src/**/*.stories.@(ts|tsx)", "../src/**/*.mdx"],
+  addons: [
+    "@storybook/addon-essentials",
+    "@storybook/addon-a11y",
+    "@storybook/addon-interactions",
+  ],
+  framework: {
+    name: "@storybook/react-vite",
+    options: {},
+  },
+};
+
+export default config;
+```
+
+## Story-Per-Component Architecture
+
+Each component gets its own story file colocated with the source:
+
+```
+src/
+  button/
+    index.ts        # Component source
+    Button.stories.tsx  # Stories
+  slider/
+    index.ts
+    Slider.stories.tsx
+  tabs/
+    index.ts
+    Tabs.stories.tsx
+```
+
+A story file defines one or more "stories" — specific states or configurations of the component:
+
+```tsx
+// src/button/Button.stories.tsx
+import type { Meta, StoryObj } from "@storybook/react";
+import { Button } from "./index";
+
+const meta: Meta<typeof Button> = {
+  title: "Components/Button",
+  component: Button,
+  tags: ["autodocs"],
+  argTypes: {
+    disabled: { control: "boolean" },
+    children: { control: "text" },
+  },
+};
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {
+  args: {
+    children: "Click me",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    children: "Disabled",
+    disabled: true,
+  },
+};
+
+export const AsLink: Story = {
+  args: {
+    children: "Link Button",
+    render: <a href="#" />,
+  },
+};
+```
+
+### The `tags: ["autodocs"]` Pattern
+
+The `autodocs` tag tells Storybook to automatically generate a documentation page from your stories and component props. It extracts TypeScript interfaces and JSDoc comments to produce a props table.
+
+## Controls Addon
+
+The **Controls** addon generates interactive knobs from your component's props. Consumers can adjust props in real time to explore component behavior:
+
+```tsx
+const meta: Meta<typeof Slider.Root> = {
+  title: "Components/Slider",
+  component: Slider.Root,
+  argTypes: {
+    min: { control: { type: "number", min: 0, max: 100, step: 1 } },
+    max: { control: { type: "number", min: 0, max: 1000, step: 10 } },
+    step: { control: { type: "number", min: 1, max: 50 } },
+    defaultValue: { control: { type: "number", min: 0, max: 100 } },
+    disabled: { control: "boolean" },
+    orientation: {
+      control: "radio",
+      options: ["horizontal", "vertical"],
+    },
+  },
+};
+```
+
+<Callout type="tip">
+For compound components, create a wrapper "template" component that assembles all the pieces. Use `argTypes` on the template to expose props from all sub-components in one place.
+</Callout>
+
+### Template Pattern for Compound Components
+
+```tsx
+function SliderTemplate(args: {
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+  disabled: boolean;
+  orientation: "horizontal" | "vertical";
+}) {
+  return (
+    <Slider.Root {...args}>
+      <Slider.Track className="slider-track">
+        <Slider.Range className="slider-range" />
+      </Slider.Track>
+      <Slider.Thumb className="slider-thumb" />
+    </Slider.Root>
+  );
+}
+
+export const Horizontal: Story = {
+  render: (args) => <SliderTemplate {...args} />,
+  args: {
+    min: 0,
+    max: 100,
+    step: 1,
+    defaultValue: 50,
+    disabled: false,
+    orientation: "horizontal",
+  },
+};
+```
+
+## Accessibility Addon
+
+The **a11y addon** runs [axe-core](https://github.com/dequelabs/axe-core) accessibility audits on every story. It surfaces WCAG violations directly in the Storybook UI:
+
+```bash
+pnpm add -D @storybook/addon-a11y
+```
+
+```tsx
+// .storybook/main.ts
+addons: [
+  "@storybook/addon-essentials",
+  "@storybook/addon-a11y",  // Add this
+],
+```
+
+Once installed, every story shows an "Accessibility" panel with automated audit results. Common issues it catches:
+
+| Violation | Example |
+|-----------|---------|
+| Missing accessible name | A button with no text or `aria-label` |
+| Insufficient color contrast | Text color too close to background |
+| Missing form labels | An input without a corresponding label |
+| Invalid ARIA attributes | `aria-valuenow` without `role="slider"` |
+
+<Callout type="warning">
+Automated accessibility testing catches approximately 30-50% of WCAG issues. It cannot test keyboard interaction flow, focus management, or screen reader announcement quality. Manual testing with a screen reader is still essential.
+</Callout>
+
+### Per-Story A11y Configuration
+
+You can customize accessibility rules per story:
+
+```tsx
+export const CustomColors: Story = {
+  args: { /* ... */ },
+  parameters: {
+    a11y: {
+      config: {
+        rules: [
+          { id: "color-contrast", enabled: false }, // Disable for this story
+        ],
+      },
+    },
+  },
+};
+```
+
+## Visual Regression Testing
+
+Visual regression testing captures screenshots of each story and compares them against baseline images. This catches unintended visual changes that unit tests miss.
+
+### Chromatic Integration
+
+[Chromatic](https://www.chromatic.com/) is the Storybook-native visual testing service:
+
+```bash
+pnpm add -D chromatic
+
+# Run visual tests
+pnpm chromatic --project-token=<your-token>
+```
+
+Chromatic captures a screenshot of every story, compares it against the last approved baseline, and flags differences for review. It runs in CI and integrates with GitHub pull requests.
+
+### Self-Hosted Alternative
+
+For self-hosted visual regression, use [Playwright](https://playwright.dev/) with Storybook:
+
+```tsx
+// tests/visual/slider.spec.ts
+import { test, expect } from "@playwright/test";
+
+test("slider default state", async ({ page }) => {
+  await page.goto(
+    "http://localhost:6006/iframe.html?id=components-slider--horizontal"
+  );
+  await expect(page).toHaveScreenshot("slider-horizontal.png");
+});
+
+test("slider disabled state", async ({ page }) => {
+  await page.goto(
+    "http://localhost:6006/iframe.html?id=components-slider--disabled"
+  );
+  await expect(page).toHaveScreenshot("slider-disabled.png");
+});
+```
+
+## MDX Documentation Pages
+
+Beyond auto-generated docs, you can write rich documentation pages in MDX that combine Markdown prose with live component examples:
+
+```mdx
+{/* src/slider/Slider.mdx */}
+import { Meta, Story, Canvas, Controls } from "@storybook/blocks";
+import * as SliderStories from "./Slider.stories";
+
+<Meta of={SliderStories} />
+
+# Slider
+
+A Slider lets users select a numeric value by dragging a thumb along a track.
+
+## Usage
+
+<Canvas of={SliderStories.Horizontal} />
+<Controls of={SliderStories.Horizontal} />
+
+## Keyboard Navigation
+
+| Key | Action |
+|-----|--------|
+| ArrowRight | Increment by step |
+| ArrowLeft | Decrement by step |
+| Home | Set to minimum |
+| End | Set to maximum |
+
+## Accessibility
+
+The thumb element uses `role="slider"` with `aria-valuenow`, `aria-valuemin`,
+and `aria-valuemax` attributes.
+```
+
+This produces a polished documentation page with live, interactive examples that consumers can manipulate directly.
+
+## Organizing Your Storybook
+
+Use a logical hierarchy in story titles:
+
+```tsx
+// Primitives
+{ title: "Primitives/Button" }
+{ title: "Primitives/Input" }
+
+// Toggle & State
+{ title: "Toggle/Switch" }
+{ title: "Toggle/Checkbox" }
+
+// Navigation
+{ title: "Navigation/Tabs" }
+{ title: "Navigation/Toolbar" }
+
+// Advanced
+{ title: "Advanced/Slider" }
+{ title: "Advanced/NumberField" }
+{ title: "Advanced/Toast" }
+```
+
+This creates a sidebar navigation that mirrors your component library's module structure.
+
+## Key Takeaways
+
+1. **One story file per component**, colocated with the source code.
+2. **Use `autodocs`** for automatic prop table generation from TypeScript interfaces.
+3. **Controls addon** makes every prop interactive — essential for compound components.
+4. **a11y addon** runs axe-core on every story, catching WCAG violations early.
+5. **Visual regression testing** with Chromatic or Playwright catches unintended visual changes.
+6. **MDX docs** combine prose with live examples for rich, human-readable documentation.
+7. **Automated a11y testing is necessary but not sufficient** — always supplement with manual screen reader testing.

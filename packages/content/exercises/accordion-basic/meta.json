@@ -1,0 +1,29 @@
+{
+  "id": "accordion-basic",
+  "title": {
+    "en": "Build an Accordion Component",
+    "ja": "Accordionコンポーネントを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "05-disclosure",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Use two levels of context: AccordionContext for root state and AccordionItemContext for item-level state",
+      "Track the expanded value as a string (single-expand mode), compare with each item's value",
+      "Use React.useId() to generate linked trigger and panel IDs",
+      "Set aria-expanded on triggers and aria-controls pointing to the panel id",
+      "The panel needs role='region' and aria-labelledby pointing to the trigger id",
+      "For keyboard navigation, collect trigger refs and use ArrowDown/ArrowUp to move focus"
+    ],
+    "ja": [
+      "2階層のコンテキストを使用: ルート状態用のAccordionContextとアイテムレベル状態用のAccordionItemContext",
+      "展開中の値をstring（単一展開モード）で追跡し、各アイテムのvalueと比較します",
+      "React.useId()でトリガーとパネルの連動IDを生成します",
+      "トリガーにaria-expandedを設定し、aria-controlsでパネルIDを参照します",
+      "パネルにはrole='region'とaria-labelledbyでトリガーIDを参照する必要があります",
+      "キーボードナビゲーションには、トリガーのrefを収集しArrowDown/ArrowUpでフォーカスを移動します"
+    ]
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,300 @@
+---
+title: "The Listbox Pattern"
+description: "Master the WAI-ARIA listbox pattern including option selection, typeahead search, and multiselect — the foundation for Select and Combobox components."
+order: 1
+isFree: false
+---
+
+# The Listbox Pattern
+
+The **listbox** is a fundamental ARIA widget that presents a list of options the user can select from. Unlike a native `<select>` element, a custom listbox gives you full control over styling and behavior while preserving the accessibility contract that screen readers and keyboard users depend on. This lesson covers the ARIA roles, keyboard interactions, and implementation strategies you need before building Select and Combobox components.
+
+## ARIA Roles and Attributes
+
+The WAI-ARIA specification defines a precise relationship between the listbox container and its options:
+
+| Element | Role | Purpose |
+|---------|------|---------|
+| Container | `listbox` | Groups selectable options |
+| Each option | `option` | A selectable item within the listbox |
+
+### Required Attributes
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="listbox"` | Container | Identifies as a listbox widget |
+| `role="option"` | Each item | Identifies as a selectable option |
+| `aria-selected="true"` | Selected option(s) | Announces selection state |
+| `aria-label` or `aria-labelledby` | Listbox | Provides an accessible name |
+| `aria-multiselectable` | Listbox | Indicates multiple selection is allowed |
+| `aria-activedescendant` | Listbox | Points to the currently focused option's `id` |
+
+```tsx
+<ul role="listbox" aria-label="Favorite fruit" aria-activedescendant="option-banana">
+  <li role="option" id="option-apple" aria-selected="false">Apple</li>
+  <li role="option" id="option-banana" aria-selected="true">Banana</li>
+  <li role="option" id="option-cherry" aria-selected="false">Cherry</li>
+</ul>
+```
+
+When a screen reader encounters this structure, it announces: "Banana, selected, 2 of 3" — giving the user complete spatial awareness.
+
+## Focus Management: Two Strategies
+
+There are two approaches for managing focus within a listbox:
+
+### Strategy 1: Roving Tabindex
+
+Each option receives `tabindex="0"` (active) or `tabindex="-1"` (inactive). Arrow keys move the actual DOM focus between options.
+
+```tsx
+<li role="option" tabIndex={isActive ? 0 : -1}>Apple</li>
+```
+
+**Pros:** Simple mental model, works with screen readers by default.
+**Cons:** DOM focus moves, which can cause scroll jumps in long lists.
+
+### Strategy 2: aria-activedescendant
+
+The listbox container itself holds DOM focus. The `aria-activedescendant` attribute tells the screen reader which option is "virtually" focused.
+
+```tsx
+<ul role="listbox" tabIndex={0} aria-activedescendant={activeOptionId}>
+  <li role="option" id="option-1" data-highlighted={isHighlighted}>Apple</li>
+</ul>
+```
+
+**Pros:** No DOM focus movement, better for popups (Select, Combobox) where focus must stay on the trigger or input.
+**Cons:** Slightly more complex to implement, requires unique `id` on every option.
+
+<Callout type="tip">
+Use `aria-activedescendant` when the listbox appears inside a popup (Select, Combobox). Use roving tabindex when the listbox is always visible on the page.
+</Callout>
+
+## Keyboard Navigation
+
+The WAI-ARIA listbox pattern requires these keyboard interactions:
+
+| Key | Single-select | Multi-select |
+|-----|---------------|-------------|
+| `ArrowDown` | Move highlight to next option | Move highlight to next option |
+| `ArrowUp` | Move highlight to previous option | Move highlight to previous option |
+| `Home` | Move highlight to first option | Move highlight to first option |
+| `End` | Move highlight to last option | Move highlight to last option |
+| `Enter` / `Space` | Select highlighted option | Toggle selection on highlighted option |
+| `Shift + ArrowDown` | — | Extend selection downward |
+| `Shift + ArrowUp` | — | Extend selection upward |
+| `Ctrl + A` | — | Select all options |
+
+### Wrapping vs. Clamping
+
+Unlike tabs, the WAI-ARIA listbox spec does **not** require wrapping. When the user presses `ArrowDown` on the last option, nothing happens. When they press `ArrowUp` on the first, nothing happens. This differs from tablist behavior and is important to get right.
+
+## Typeahead Search
+
+Typeahead (also called "type-to-select") allows users to quickly navigate by typing the first few characters of an option's label. This is one of the most important usability features of a listbox:
+
+```
+User types: "b" → highlights "Banana"
+User types: "ba" → still "Banana"
+User types: "bl" → highlights "Blueberry"
+```
+
+### Implementation Strategy
+
+1. Accumulate typed characters in a buffer string.
+2. After a timeout (typically 500ms), clear the buffer.
+3. On each keystroke, search options whose text content starts with the buffer string (case-insensitive).
+4. Highlight the first match.
+
+```tsx
+function useTypeahead(options: string[], onMatch: (index: number) => void) {
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const handleTypeahead = React.useCallback(
+    (key: string) => {
+      // Only handle printable single characters
+      if (key.length !== 1) return;
+
+      clearTimeout(timeoutRef.current);
+      bufferRef.current += key.toLowerCase();
+
+      const matchIndex = options.findIndex((opt) =>
+        opt.toLowerCase().startsWith(bufferRef.current),
+      );
+
+      if (matchIndex !== -1) {
+        onMatch(matchIndex);
+      }
+
+      timeoutRef.current = setTimeout(() => {
+        bufferRef.current = "";
+      }, 500);
+    },
+    [options, onMatch],
+  );
+
+  return handleTypeahead;
+}
+```
+
+<Callout type="warning">
+Do not use `onKeyPress` for typeahead — it is deprecated. Use `onKeyDown` and filter for single printable characters by checking `key.length === 1`.
+</Callout>
+
+## Single Selection Listbox
+
+In a single-select listbox, only one option can be selected at a time. Selecting a new option automatically deselects the previous one.
+
+```tsx
+function Listbox({ options, value, onChange, label }: SingleSelectListboxProps) {
+  const [highlightedIndex, setHighlightedIndex] = React.useState(
+    Math.max(0, options.findIndex((o) => o.value === value)),
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        setHighlightedIndex((i) => Math.min(i + 1, options.length - 1));
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        setHighlightedIndex((i) => Math.max(i - 1, 0));
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setHighlightedIndex(0);
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        setHighlightedIndex(options.length - 1);
+        break;
+      }
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        onChange(options[highlightedIndex].value);
+        break;
+      }
+    }
+  };
+
+  const activeDescendantId = `option-${options[highlightedIndex].value}`;
+
+  return (
+    <ul
+      role="listbox"
+      aria-label={label}
+      aria-activedescendant={activeDescendantId}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
+      {options.map((option, index) => (
+        <li
+          key={option.value}
+          role="option"
+          id={`option-${option.value}`}
+          aria-selected={option.value === value}
+          data-highlighted={index === highlightedIndex}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Multi-select Listbox
+
+A multi-select listbox uses `aria-multiselectable="true"` on the container. Each option independently toggles between selected and deselected states.
+
+```tsx
+<ul role="listbox" aria-label="Toppings" aria-multiselectable="true">
+  <li role="option" aria-selected="true">Cheese</li>
+  <li role="option" aria-selected="false">Pepperoni</li>
+  <li role="option" aria-selected="true">Mushrooms</li>
+</ul>
+```
+
+### Selection Interactions
+
+| Action | Behavior |
+|--------|----------|
+| `Space` / `Enter` on option | Toggle that option's selection |
+| `Shift + ArrowDown` | Move highlight and add to selection |
+| `Shift + ArrowUp` | Move highlight and add to selection |
+| `Ctrl + A` | Select all options |
+| Click | Select only that option (deselect others) |
+| `Ctrl + Click` | Toggle that option without affecting others |
+| `Shift + Click` | Select range from last selected to clicked |
+
+### Managing Multi-select State
+
+```tsx
+const [selectedValues, setSelectedValues] = React.useState<Set<string>>(new Set());
+
+const toggleSelection = (value: string) => {
+  setSelectedValues((prev) => {
+    const next = new Set(prev);
+    if (next.has(value)) {
+      next.delete(value);
+    } else {
+      next.add(value);
+    }
+    return next;
+  });
+};
+```
+
+## Styling the Highlighted and Selected States
+
+Use `data-*` attributes for CSS styling since ARIA attributes should not be used as CSS selectors (their values may change across implementations):
+
+```css
+[role="option"][data-highlighted="true"] {
+  background: var(--color-accent-subtle);
+  outline: 2px solid var(--color-accent);
+}
+
+[role="option"][aria-selected="true"] {
+  font-weight: 600;
+}
+
+[role="option"][aria-selected="true"]::before {
+  content: "✓ ";
+}
+```
+
+<Callout type="info">
+The distinction between "highlighted" (visually focused) and "selected" (chosen value) is critical. A user can highlight option B while option A remains selected. These are two independent states.
+</Callout>
+
+## Scrolling Into View
+
+When a listbox contains more options than are visible, highlighting an option should scroll it into the viewport:
+
+```tsx
+React.useEffect(() => {
+  const option = document.getElementById(activeDescendantId);
+  option?.scrollIntoView({ block: "nearest" });
+}, [activeDescendantId]);
+```
+
+Use `block: "nearest"` rather than `block: "center"` to avoid jarring scroll jumps when the option is already partially visible.
+
+## Key Takeaways
+
+1. **`role="listbox"` + `role="option"`** create the semantic structure screen readers need to announce selection state.
+2. **`aria-activedescendant`** is preferred for popup listboxes (Select, Combobox) because focus stays on the trigger element.
+3. **Typeahead search** lets users jump to options by typing — use a 500ms buffer timeout.
+4. **Single-select** automatically deselects the previous option; **multi-select** uses `aria-multiselectable="true"` and toggle semantics.
+5. **Highlighted vs. selected** are two independent states — do not conflate them.
+6. **No wrapping** — unlike tabs, listbox navigation clamps at the first and last option.
+7. **`scrollIntoView({ block: "nearest" })`** keeps the highlighted option visible without jarring jumps.

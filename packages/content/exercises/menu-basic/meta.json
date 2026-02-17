@@ -1,0 +1,29 @@
+{
+  "id": "menu-basic",
+  "title": {
+    "en": "Build a Menu Component",
+    "ja": "Menuコンポーネントを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "10-menus",
+  "order": 2,
+  "hints": {
+    "en": [
+      "The trigger button needs aria-haspopup='menu', aria-expanded, and aria-controls",
+      "The popup container needs role='menu', and each item needs role='menuitem'",
+      "When the menu opens, move DOM focus to the first menu item using requestAnimationFrame",
+      "Arrow keys wrap around: ArrowDown on last item goes to first, ArrowUp on first goes to last",
+      "Enter/Space on a menu item activates it (calls onSelect) and closes the menu",
+      "Escape closes the menu and returns focus to the trigger button"
+    ],
+    "ja": [
+      "トリガーボタンにはaria-haspopup='menu'、aria-expanded、aria-controlsが必要です",
+      "ポップアップコンテナにはrole='menu'、各項目にはrole='menuitem'が必要です",
+      "メニューが開いたらrequestAnimationFrameで最初のメニュー項目にDOMフォーカスを移動します",
+      "矢印キーはラップします：最後の項目でArrowDownは最初に、最初の項目でArrowUpは最後に移動します",
+      "メニュー項目でEnter/Spaceを押すとアクション（onSelect）が実行されメニューが閉じます",
+      "Escapeでメニューが閉じ、フォーカスがトリガーボタンに戻ります"
+    ]
+  },
+  "dependencies": {}
+}

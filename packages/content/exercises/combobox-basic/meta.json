@@ -1,0 +1,29 @@
+{
+  "id": "combobox-basic",
+  "title": {
+    "en": "Build a Combobox/Autocomplete Component",
+    "ja": "Combobox/オートコンプリートコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "09-selection",
+  "order": 3,
+  "hints": {
+    "en": [
+      "The input element needs role='combobox', aria-haspopup='listbox', aria-expanded, aria-controls, and aria-autocomplete='list'",
+      "DOM focus always stays on the input — use aria-activedescendant to indicate the highlighted option",
+      "Filter options by checking if the label includes the input value (case-insensitive)",
+      "ArrowDown/ArrowUp navigate the filtered options, Enter selects the highlighted option",
+      "When an option is selected, update the input value to show the option's label",
+      "Escape closes the popup when open, or clears the input when the popup is already closed"
+    ],
+    "ja": [
+      "input要素にはrole='combobox'、aria-haspopup='listbox'、aria-expanded、aria-controls、aria-autocomplete='list'が必要です",
+      "DOMフォーカスは常にinputに保持し、aria-activedescendantでハイライトされたオプションを示します",
+      "ラベルがinputの値を含むかチェックしてオプションをフィルタリングします（大文字小文字区別なし）",
+      "ArrowDown/ArrowUpでフィルタされたオプションをナビゲート、Enterでハイライトされたオプションを選択",
+      "オプションが選択されたら、inputの値をオプションのラベルに更新します",
+      "Escapeはポップアップが開いている時は閉じ、既に閉じている時はinputをクリアします"
+    ]
+  },
+  "dependencies": {}
+}

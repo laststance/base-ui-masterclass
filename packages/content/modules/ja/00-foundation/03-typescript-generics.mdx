@@ -1,0 +1,287 @@
+---
+title: "UIライブラリのためのTypeScriptジェネリクス"
+description: "TypeScriptジェネリクスが型安全で柔軟なコンポーネントAPIをどのように実現するかを学びます。基本的なジェネリックpropsから制約付きジェネリクス、Base UIで使用される実践的パターンまで。"
+order: 3
+isFree: true
+---
+
+# UIライブラリのためのTypeScriptジェネリクス
+
+ヘッドレスUIライブラリの成否は、TypeScript体験にかかっています。オートコンプリートが間違っていたり、イベントハンドラーの型が失われたり、値の制約が無視されたりすると、ランタイムの挙動がどんなに優れていても開発者はそのライブラリを使わなくなります。**ジェネリクス**こそが、これらすべてを実現するツールです。
+
+このレッスンでは、コース全体を通して使用するジェネリクスパターンを、抽象的な理論としてではなく、実際のコンポーネントを構築するための実践的なテクニックとして解説します。
+
+## なぜヘッドレスUIにジェネリクスが重要なのか
+
+`Select`コンポーネントを考えてみましょう。ユーザーが選択する値は `string`、`number`、あるいは `{ id: number; label: string }` のような複雑なオブジェクトかもしれません。ジェネリクスなしでは、3つの選択肢がありますが — すべて問題があります：
+
+| アプローチ | 問題点 |
+|-----------|--------|
+| `value: string` | すべてを文字列化することを強制 |
+| `value: any` | 型安全性が一切なし |
+| `value: string \| number \| object` | 緩いユニオン型、特定の型へのオートコンプリートなし |
+
+ジェネリクスを使えば、コンポーネントが使用状況から型を**推論**します：
+
+```tsx
+// 利用者はこう書く — TypeScriptが Value = User と推論
+<Select.Root value={currentUser} onValueChange={(user) => setUser(user)}>
+  {users.map((u) => (
+    <Select.Option key={u.id} value={u}>
+      {u.name}
+    </Select.Option>
+  ))}
+</Select.Root>
+```
+
+`onValueChange`コールバックは、利用者が型アノテーションを一切書かなくても `(value: User) => void` と正しく型付けされます。これがジェネリクスの力です。
+
+## ジェネリクスの基礎
+
+### ジェネリック関数
+
+その核心において、ジェネリクスとは**型パラメータ** — 関数が呼ばれたときに埋められるプレースホルダーです。
+
+```tsx
+/**
+ * 型を保持したまま配列の最初の要素を返します。
+ *
+ * @example
+ * const n = first([1, 2, 3]); // 型: number
+ * const s = first(["a", "b"]); // 型: string
+ */
+function first<T>(items: T[]): T {
+  return items[0];
+}
+```
+
+`T`は具体的な型ではありません。TypeScriptが文脈から埋める変数です。`first([1, 2, 3])`を呼ぶと、TypeScriptは `T = number` と推論し、戻り値の型は `number` になります。
+
+### ジェネリックReactコンポーネント
+
+同じ原理がReactコンポーネントにも適用されます。ジェネリックコンポーネントは、propsを通じて流れる型パラメータを受け取ります。
+
+```tsx
+interface ListProps<T> {
+  items: T[];
+  renderItem: (item: T) => React.ReactNode;
+}
+
+/**
+ * 任意のアイテム型をレンダリングするジェネリックリストコンポーネント。
+ *
+ * @example
+ * <List items={users} renderItem={(user) => <span>{user.name}</span>} />
+ */
+function List<T>(props: ListProps<T>) {
+  return <ul>{props.items.map((item, i) => <li key={i}>{props.renderItem(item)}</li>)}</ul>;
+}
+```
+
+利用者が `items={users}` を渡すと、TypeScriptは `T = User` と推論し、`renderItem`コールバックは完全なオートコンプリート付きで `(item: User) => ...` を受け取ります。
+
+## 制約付きジェネリクス
+
+すべての型がすべてのコンポーネントに有効なわけではありません。`Combobox`は値の型が `===` で比較可能であることを要求するかもしれません。`Tabs`コンポーネントは文字列キーを必要とするかもしれません。**制約**により、`T`が何になれるかを制限できます。
+
+```tsx
+/**
+ * `id`プロパティでアイテムを検索します。
+ * Tは`id`フィールドを持つオブジェクトに制約されます。
+ *
+ * @example
+ * const user = findById(users, 1); // UserがidをもつためOK
+ * findById([1, 2, 3], 1); // エラー: numberにidプロパティはない
+ */
+function findById<T extends { id: number }>(items: T[], id: number): T | undefined {
+  return items.find((item) => item.id === id);
+}
+```
+
+`extends`キーワードが制約です。`T extends { id: number }`は「Tは任意の型でよいが、少なくとも`number`型の`id`プロパティを持つ必要がある」ことを意味します。
+
+### コンポーネントpropsでの制約
+
+Selectコンポーネントの現実的な制約付きジェネリクスの例：
+
+```tsx
+interface SelectRootProps<Value> {
+  value?: Value;
+  defaultValue?: Value;
+  onValueChange?: (value: Value) => void;
+  children: React.ReactNode;
+}
+
+/**
+ * 値の型を保持するジェネリックなSelectルート。
+ *
+ * @example
+ * // Valueはstringと推論
+ * <SelectRoot defaultValue="apple" onValueChange={(v) => console.log(v)}>
+ *   ...
+ * </SelectRoot>
+ *
+ * @example
+ * // Valueは { id: number; label: string } と推論
+ * <SelectRoot<Fruit> value={selectedFruit} onValueChange={setSelectedFruit}>
+ *   ...
+ * </SelectRoot>
+ */
+function SelectRoot<Value>(props: SelectRootProps<Value>) {
+  // 実装
+}
+```
+
+ここで `Value` には制約がありません — どの型でも有効です。ただし、制約を追加することもできます：
+
+```tsx
+// 文字列として表示できる値のみ許可
+function SelectRoot<Value extends { toString(): string }>(
+  props: SelectRootProps<Value>
+) { /* ... */ }
+```
+
+## 複数の型パラメータ
+
+一部のコンポーネントは複数のジェネリクスが必要です。Base UIの `Combobox` は、`Value`型と戻り値の型を変える`Multiple`フラグの両方を持ちます。
+
+```tsx
+interface ComboboxProps<Value, Multiple extends boolean | undefined = false> {
+  multiple?: Multiple;
+  value?: Multiple extends true ? Value[] : Value;
+  onValueChange?: Multiple extends true
+    ? (values: Value[]) => void
+    : (value: Value) => void;
+}
+```
+
+これはジェネリックパラメータによって駆動される**条件型**です。`Multiple`が`true`の場合、値は配列になります。`false`（または省略時）は単一値のままです。
+
+```tsx
+// 単一選択 — valueはFruit、コールバックはFruitを受け取る
+<Combobox value={apple} onValueChange={(fruit) => { /* Fruit */ }} />
+
+// 複数選択 — valueはFruit[]、コールバックはFruit[]を受け取る
+<Combobox multiple value={[apple, banana]} onValueChange={(fruits) => { /* Fruit[] */ }} />
+```
+
+このパターンは、Base UIのSelect、Combobox、ToggleGroupコンポーネントで頻繁に使用されます。
+
+## Contextを通じたジェネリクスの伝搬
+
+コンパウンドコンポーネントでは、ジェネリクスをRootからContextを通じてサブコンポーネントに流す必要があります。これはより難しいパターンのひとつです。
+
+```tsx
+interface SelectContextValue<Value> {
+  selectedValue: Value | null;
+  onSelect: (value: Value) => void;
+}
+
+// Context作成時にジェネリクスが不明なため、デフォルトには`any`を使用
+const SelectContext = React.createContext<SelectContextValue<any> | null>(null);
+
+/**
+ * Contextを正しいジェネリック型にキャストする型安全なフック。
+ *
+ * @example
+ * const { selectedValue, onSelect } = useSelectContext<User>();
+ */
+function useSelectContext<Value>(): SelectContextValue<Value> {
+  const ctx = React.useContext(SelectContext);
+  if (!ctx) throw new Error("Select.Root内で使用する必要があります");
+  return ctx as SelectContextValue<Value>;
+}
+```
+
+ここでの `as` キャストは安全です。Rootコンポーネントが正しい型でContextを作成するため — `createContext`の境界で型情報が失われ、フック内で復元しているだけです。
+
+## `render` Propとポリモーフィック型
+
+Base UIコンポーネントは、基盤となるDOM要素を置き換える `render` propを受け取ります。これを型安全にするにはジェネリクスが必要です。
+
+```tsx
+type RenderProp<Props> = React.ReactElement | ((props: Props) => React.ReactElement);
+
+interface TriggerProps {
+  render?: RenderProp<React.ButtonHTMLAttributes<HTMLButtonElement>>;
+  children?: React.ReactNode;
+}
+
+/**
+ * 任意の要素としてレンダリングできるトリガーボタン。
+ *
+ * @example
+ * // デフォルト: <button>をレンダリング
+ * <Trigger>クリックしてください</Trigger>
+ *
+ * @example
+ * // カスタム: ボタンpropsがマージされた<div>をレンダリング
+ * <Trigger render={<MyCustomButton />}>クリック</Trigger>
+ *
+ * @example
+ * // 関数形式: 完全な制御
+ * <Trigger render={(props) => <a {...props} href="/page">リンク</a>}>
+ *   ナビゲート
+ * </Trigger>
+ */
+function Trigger({ render, children }: TriggerProps) {
+  const triggerProps = {
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: () => { /* トグルロジック */ },
+  };
+
+  if (typeof render === "function") {
+    return render(triggerProps);
+  }
+
+  if (React.isValidElement(render)) {
+    return React.cloneElement(render, triggerProps);
+  }
+
+  return <button {...triggerProps}>{children}</button>;
+}
+```
+
+## Base UIのProp Typesパターン
+
+Base UIは名前空間を通じてprop型を公開しており、型付きラッパーの作成を容易にします：
+
+```tsx
+import { Tooltip } from "@base-ui/react/tooltip";
+
+// サブコンポーネントの正確なprop型にアクセス
+function MyTooltip(props: Tooltip.Root.Props) {
+  return <Tooltip.Root {...props} />;
+}
+
+// 型パラメータを転送するComboboxのジェネリックラッパー
+function MyCombobox<Value, Multiple extends boolean | undefined = false>(
+  props: Combobox.Root.Props<Value, Multiple>,
+): React.JSX.Element {
+  return <Combobox.Root {...props} />;
+}
+```
+
+このパターンにより、ラッパーコンポーネントがBase UIの型と自動的に同期されます。
+
+## クイックリファレンス
+
+| パターン | 使用場面 | 例 |
+|---------|---------|---|
+| `<T>` 基本ジェネリック | コンポーネントが任意の値型を受け取る | `List<T>`, `SelectRoot<Value>` |
+| `T extends 制約` | 値が特定の形状を持つ必要がある | `T extends { id: string }` |
+| 複数ジェネリクス | モードによって動作が変わる | `<Value, Multiple extends boolean>` |
+| 条件型 | フラグによって戻り値の型が変わる | `Multiple extends true ? V[] : V` |
+| Context伝搬 | Contextを通じてジェネリック型を共有 | `useSelectContext<Value>()` |
+| `render` prop型付け | ポリモーフィックな要素置換 | `RenderProp<ButtonHTMLAttributes>` |
+
+## 演習
+
+以下の要件でジェネリックな `RadioGroup` コンポーネントを作成してください：
+
+1. `RadioGroup.Root<Value>` は `value`、`defaultValue`、`onValueChange` を受け取る — すべて `Value` 型。
+2. `RadioGroup.Item` は `value: Value` を受け取り、ラジオボタンをレンダリングする。
+3. `Value = "small" | "medium" | "large"` で `RadioGroup` を使用する利用者を記述し、TypeScriptが `"xl"` のような無効な値をキャッチすることを確認する。
+
+この演習により、ジェネリクスがRootからContextを通じてリーフコンポーネントに流れる仕組みの理解が固まります — このコースのすべてのコンポーネントで使用するまさにそのパターンです。

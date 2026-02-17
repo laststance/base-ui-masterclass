@@ -1,0 +1,173 @@
+---
+title: "Building a Headless Button"
+description: "Learn how to build a headless Button component with render prop composition, React 19 ref forwarding, data attributes for styling hooks, and polymorphic rendering."
+order: 1
+isFree: false
+---
+
+# Building a Headless Button
+
+The Button is the simplest headless primitive, yet it introduces every core concept you will use throughout this course: the **render prop**, **ref forwarding**, **data attributes**, and **polymorphic rendering**.
+
+## Why a Headless Button?
+
+A native `<button>` already handles click events and keyboard activation. So why wrap it?
+
+1. **Consistent data attributes** -- Expose `data-disabled`, `data-pressed`, etc. so CSS can style states without JavaScript class toggling.
+2. **Polymorphic rendering** -- Sometimes a "button" is actually an `<a>`, a Next.js `<Link>`, or a React Router `<NavLink>`. The render prop makes this seamless.
+3. **Prop normalization** -- Ensure `disabled` also sets `aria-disabled` when rendering a non-button element (anchors cannot be `disabled`).
+
+## Step 1: Define the Props Interface
+
+```tsx
+import * as React from "react";
+
+interface ButtonProps extends React.ComponentPropsWithoutRef<"button"> {
+  /**
+   * Optional render prop for polymorphic rendering.
+   * Pass a ReactElement (e.g. <a />) and the Button will
+   * clone it with the computed props.
+   */
+  render?: React.ReactElement;
+}
+```
+
+We extend `ComponentPropsWithoutRef<"button">` so consumers get full IntelliSense for native button attributes. The `render` prop accepts a React element that will be cloned with the button's merged props.
+
+## Step 2: Implement the Component
+
+```tsx
+export function Button({ render, disabled, ...props }: ButtonProps) {
+  // Compute data attributes for CSS styling hooks
+  const dataAttributes = {
+    "data-disabled": disabled || undefined,
+  };
+
+  // Merge everything into a single props object
+  const elementProps = {
+    ...props,
+    disabled,
+    ...dataAttributes,
+  };
+
+  // If a render prop is provided, clone it with computed props
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  // Default: render a native <button>
+  return <button {...elementProps} />;
+}
+```
+
+### Key decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `data-disabled` uses `\|\| undefined` | Attributes set to `undefined` are omitted from the DOM entirely, keeping markup clean |
+| `React.cloneElement` over render function | Matches the Base UI pattern -- the consumer passes an element, not a function |
+| No `forwardRef` wrapper | React 19 passes `ref` as a regular prop; no wrapper needed |
+
+## Step 3: React 19 Ref Forwarding
+
+In React 19, `ref` is just another prop. No `forwardRef` needed:
+
+```tsx
+export function Button({ render, disabled, ref, ...props }: ButtonProps) {
+  const elementProps = {
+    ...props,
+    ref,
+    disabled,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+Update the props type to include `ref`:
+
+```tsx
+interface ButtonProps extends React.ComponentPropsWithoutRef<"button"> {
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+This is the React 19 way. The `ref` flows through like any other prop, and consumers attach it normally:
+
+```tsx
+function App() {
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
+  return <Button ref={buttonRef}>Click me</Button>;
+}
+```
+
+## Step 4: Polymorphic Rendering in Practice
+
+The render prop enables rendering any element as a "button":
+
+```tsx
+// As a link
+<Button render={<a href="/dashboard" />}>Go to Dashboard</Button>
+
+// With a Next.js Link
+<Button render={<Link href="/settings" />}>Settings</Button>
+
+// With a React Router NavLink
+<Button render={<NavLink to="/profile" />}>Profile</Button>
+```
+
+When rendering a non-`<button>` element, you should also handle accessibility. Native `<a>` elements do not support the `disabled` attribute, so use `aria-disabled` instead:
+
+```tsx
+export function Button({ render, disabled, ref, ...props }: ButtonProps) {
+  const isNativeButton = !render;
+
+  const elementProps = {
+    ...props,
+    ref,
+    "data-disabled": disabled || undefined,
+    ...(isNativeButton
+      ? { disabled }
+      : { "aria-disabled": disabled || undefined }),
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+## Step 5: Data Attributes as Styling Hooks
+
+Data attributes are the headless UI secret weapon. Instead of passing `className` strings, we expose state through the DOM:
+
+```css
+/* Style the button based on data attributes */
+.my-button[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+This pattern scales beautifully. As components grow more complex (Switch, Checkbox, Dialog), data attributes like `data-checked`, `data-open`, and `data-pressed` become the primary styling API.
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| Render prop | Clone a user-provided element with computed props |
+| React 19 ref | Pass `ref` as a regular prop -- no `forwardRef` |
+| Data attributes | Expose component state to CSS without class name props |
+| Polymorphic rendering | One component, any underlying HTML element |
+
+These four patterns are the DNA of every Base UI component. Master them here, and the rest of the course builds naturally on top.
+
+<Exercise id="button-basic" />

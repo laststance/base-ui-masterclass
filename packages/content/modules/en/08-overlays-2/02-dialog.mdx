@@ -1,0 +1,491 @@
+---
+title: "Building a Dialog Component"
+description: "Learn how to build an accessible Dialog with focus trap, portal rendering, Escape to close, scroll lock, role=dialog, and aria-modal."
+order: 2
+isFree: false
+---
+
+# Building a Dialog Component
+
+A **dialog** (also called a modal) is an overlay window that blocks interaction with the page behind it. Dialogs demand the user's attention — they must respond to the dialog before they can return to the main content. This makes dialogs the most "aggressive" UI pattern, so use them sparingly and only when you need to interrupt the user's workflow.
+
+## When to Use a Dialog
+
+| Use Dialog | Do Not Use Dialog |
+|-----------|-------------------|
+| Confirming destructive actions | Displaying simple status messages (use toast) |
+| Collecting essential input | Showing supplementary info (use popover) |
+| Multi-step workflows | Navigation menus (use menu or navigation) |
+| Critical alerts requiring action | Non-blocking notifications (use banner) |
+
+## ARIA Semantics
+
+The WAI-ARIA specification defines precise semantics for modal dialogs:
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="dialog"` | Dialog container | Identifies the element as a dialog |
+| `aria-modal="true"` | Dialog container | Tells assistive tech that content behind is inert |
+| `aria-labelledby` | Dialog container | Points to the dialog's title element |
+| `aria-describedby` | Dialog container | Points to the dialog's description (optional) |
+
+When a screen reader encounters a dialog with these attributes, it announces: "Dialog: [title]. [description]." and confines its virtual cursor to the dialog content.
+
+```tsx
+<div
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="dialog-title"
+  aria-describedby="dialog-desc"
+>
+  <h2 id="dialog-title">Delete Account</h2>
+  <p id="dialog-desc">This action cannot be undone.</p>
+  <button>Cancel</button>
+  <button>Delete</button>
+</div>
+```
+
+<Callout type="warning">
+`aria-modal="true"` tells screen readers to confine their virtual cursor to the dialog, but it does NOT prevent keyboard focus from leaving. You must implement a proper focus trap for that. These are complementary mechanisms.
+</Callout>
+
+## Component API Design
+
+```tsx
+interface DialogProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+```
+
+Compound components:
+
+- **`Dialog.Root`** — Manages open/close state.
+- **`Dialog.Trigger`** — Button that opens the dialog.
+- **`Dialog.Portal`** — Renders children into a portal.
+- **`Dialog.Overlay`** — The backdrop behind the dialog.
+- **`Dialog.Content`** — The dialog panel with focus trap.
+- **`Dialog.Title`** — The dialog heading linked via `aria-labelledby`.
+- **`Dialog.Description`** — Optional description linked via `aria-describedby`.
+- **`Dialog.Close`** — Button that closes the dialog.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface DialogContextValue {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  titleId: string;
+  descriptionId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}
+
+const DialogContext = React.createContext<DialogContextValue | null>(null);
+
+function useDialogContext() {
+  const ctx = React.useContext(DialogContext);
+  if (!ctx) throw new Error("Dialog components must be used within Dialog.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+}: DialogProps & { children: React.ReactNode }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
+  const titleId = React.useId();
+  const descriptionId = React.useId();
+
+  const setOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [controlledOpen, onOpenChange],
+  );
+
+  const ctx = React.useMemo(
+    () => ({ open, setOpen, titleId, descriptionId, triggerRef, contentRef }),
+    [open, setOpen, titleId, descriptionId],
+  );
+
+  return <DialogContext value={ctx}>{children}</DialogContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen, triggerRef } = useDialogContext();
+
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      onClick={() => setOpen(true)}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Portal ---
+
+function Portal({ children }: { children: React.ReactNode }) {
+  const { open } = useDialogContext();
+  if (!open) return null;
+  return createPortal(
+    <div data-portal="">{children}</div>,
+    document.body,
+  );
+}
+
+// --- Overlay ---
+
+function Overlay({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { setOpen } = useDialogContext();
+
+  return (
+    <div
+      className={className}
+      data-dialog-overlay=""
+      onClick={() => setOpen(false)}
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, setOpen, titleId, descriptionId, triggerRef, contentRef } =
+    useDialogContext();
+
+  // Focus trap sentinels
+  const getFocusableElements = () => {
+    if (!contentRef.current) return [];
+    return Array.from(
+      contentRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+  };
+
+  const handleSentinelFocus = (position: "start" | "end") => {
+    const focusable = getFocusableElements();
+    if (focusable.length === 0) return;
+    if (position === "start") {
+      focusable[focusable.length - 1].focus();
+    } else {
+      focusable[0].focus();
+    }
+  };
+
+  // Initial focus
+  React.useEffect(() => {
+    if (!open || !contentRef.current) return;
+
+    const autoFocusTarget =
+      contentRef.current.querySelector<HTMLElement>("[data-autofocus]");
+    if (autoFocusTarget) {
+      autoFocusTarget.focus();
+      return;
+    }
+
+    const focusable = getFocusableElements();
+    if (focusable.length > 0) {
+      focusable[0].focus();
+    } else {
+      contentRef.current.focus();
+    }
+  }, [open]);
+
+  // Escape key
+  React.useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, setOpen]);
+
+  // Scroll lock
+  React.useEffect(() => {
+    if (!open) return;
+    const scrollY = window.scrollY;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.width = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [open]);
+
+  // Inert siblings
+  React.useEffect(() => {
+    if (!open) return;
+    const portal = contentRef.current?.closest("[data-portal]");
+    const siblings = Array.from(document.body.children).filter(
+      (el) => el !== portal,
+    );
+    siblings.forEach((el) => el.setAttribute("inert", ""));
+    return () => siblings.forEach((el) => el.removeAttribute("inert"));
+  }, [open]);
+
+  // Return focus on close
+  React.useEffect(() => {
+    if (!open) {
+      triggerRef.current?.focus();
+    }
+  }, [open, triggerRef]);
+
+  return (
+    <>
+      <div
+        tabIndex={0}
+        onFocus={() => handleSentinelFocus("start")}
+        aria-hidden="true"
+        style={{ position: "fixed", opacity: 0, pointerEvents: "none" }}
+      />
+      <div
+        ref={contentRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        className={className}
+        {...props}
+      >
+        {children}
+      </div>
+      <div
+        tabIndex={0}
+        onFocus={() => handleSentinelFocus("end")}
+        aria-hidden="true"
+        style={{ position: "fixed", opacity: 0, pointerEvents: "none" }}
+      />
+    </>
+  );
+}
+
+// --- Title ---
+
+function Title({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"h2">) {
+  const { titleId } = useDialogContext();
+  return (
+    <h2 id={titleId} {...props}>
+      {children}
+    </h2>
+  );
+}
+
+// --- Description ---
+
+function Description({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"p">) {
+  const { descriptionId } = useDialogContext();
+  return (
+    <p id={descriptionId} {...props}>
+      {children}
+    </p>
+  );
+}
+
+// --- Close ---
+
+function Close({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen } = useDialogContext();
+  return (
+    <button type="button" onClick={() => setOpen(false)} {...props}>
+      {children}
+    </button>
+  );
+}
+
+export const Dialog = {
+  Root,
+  Trigger,
+  Portal,
+  Overlay,
+  Content,
+  Title,
+  Description,
+  Close,
+};
+```
+
+## Understanding the Interaction Flow
+
+Here is the complete lifecycle of a dialog interaction:
+
+```
+1. User clicks Trigger
+   └─ setOpen(true)
+   └─ Portal mounts into document.body
+   └─ Overlay renders (blocks background clicks)
+   └─ Content renders with sentinels
+   └─ Siblings get inert attribute
+   └─ Body scroll locks
+   └─ Focus moves to first focusable element
+
+2. User interacts with dialog
+   └─ Tab/Shift+Tab cycles within sentinels
+   └─ Escape key → setOpen(false)
+   └─ Overlay click → setOpen(false)
+   └─ Close button → setOpen(false)
+
+3. Dialog closes
+   └─ Portal unmounts
+   └─ Siblings lose inert attribute
+   └─ Body scroll unlocks
+   └─ Focus returns to Trigger
+```
+
+## Usage Example
+
+```tsx
+function DeleteConfirmation() {
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger>Delete Account</Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content">
+          <Dialog.Title>Delete Account</Dialog.Title>
+          <Dialog.Description>
+            This will permanently delete your account and all associated data.
+            This action cannot be undone.
+          </Dialog.Description>
+          <div className="dialog-actions">
+            <Dialog.Close>Cancel</Dialog.Close>
+            <button onClick={handleDelete}>Delete Forever</button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+## CSS Strategies
+
+```css
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+
+.dialog-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-width: 480px;
+  width: calc(100% - 32px);
+  z-index: 51;
+}
+
+.dialog-content:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+```
+
+<Callout type="tip">
+The dialog content uses `position: fixed` with `transform: translate(-50%, -50%)` for centering. This is independent of the portal's position in the DOM and works regardless of any parent element's styling.
+</Callout>
+
+## Animation Pattern
+
+For entry/exit animations, use `data-state` attributes:
+
+```css
+.dialog-overlay[data-state="open"] {
+  animation: fadeIn 200ms ease-out;
+}
+
+.dialog-content[data-state="open"] {
+  animation: slideIn 200ms ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog-overlay[data-state="open"],
+  .dialog-content[data-state="open"] {
+    animation: none;
+  }
+}
+```
+
+## Key Takeaways
+
+1. **`role="dialog"` + `aria-modal="true"`** defines the dialog semantics for screen readers.
+2. **`aria-labelledby`** links the dialog to its title for proper announcement.
+3. **Focus trap** with sentinel elements prevents Tab from leaving the dialog.
+4. **`inert`** on sibling elements hides background content from assistive technology.
+5. **Scroll lock** prevents background scrolling while the dialog is open.
+6. **Escape key** must close the dialog.
+7. **Overlay click** should close standard dialogs (but not alert dialogs — next lesson).
+8. **Focus returns** to the trigger element when the dialog closes.
+
+## Try It Yourself
+
+<Exercise id="dialog-basic" />

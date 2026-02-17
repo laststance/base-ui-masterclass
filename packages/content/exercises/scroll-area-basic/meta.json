@@ -1,0 +1,29 @@
+{
+  "id": "scroll-area-basic",
+  "title": {
+    "en": "Build a ScrollArea Component",
+    "ja": "ScrollAreaコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "11-advanced",
+  "order": 3,
+  "hints": {
+    "en": [
+      "The Viewport uses native overflow: scroll with hidden native scrollbars (scrollbar-width: none)",
+      "Calculate thumb size as (clientHeight / scrollHeight) * trackHeight, with a minimum of 20px",
+      "Calculate thumb position from scrollTop / (scrollHeight - clientHeight) * (trackHeight - thumbSize)",
+      "Listen to the viewport's scroll event (passive) and use ResizeObserver for dynamic content",
+      "Use setPointerCapture on the thumb's pointerdown to handle drag-to-scroll smoothly",
+      "Only render the scrollbar when content overflows (scrollHeight > clientHeight)"
+    ],
+    "ja": [
+      "Viewportはネイティブのoverflow: scrollを使用し、ネイティブスクロールバーは非表示にします（scrollbar-width: none）",
+      "サムサイズを(clientHeight / scrollHeight) * trackHeightで計算し、最小20pxを確保します",
+      "サム位置をscrollTop / (scrollHeight - clientHeight) * (trackHeight - thumbSize)で計算します",
+      "ビューポートのscrollイベント（passive）をリッスンし、動的コンテンツにはResizeObserverを使用します",
+      "サムのpointerdownでsetPointerCaptureを使用し、スムーズなドラッグスクロールを実現します",
+      "コンテンツがオーバーフローした時のみスクロールバーを表示します（scrollHeight > clientHeight）"
+    ]
+  },
+  "dependencies": {}
+}

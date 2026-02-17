@@ -1,0 +1,186 @@
+---
+title: "Building a Progress Component"
+description: "Learn how to build an accessible Progress indicator with role='progressbar', ARIA value attributes, and CSS custom properties for flexible styling."
+order: 1
+isFree: false
+---
+
+# Building a Progress Component
+
+A **Progress** component communicates the completion status of a task to the user. It is one of the simplest data-display components, but getting accessibility right is essential. Screen readers rely on specific ARIA attributes to announce progress changes, and CSS custom properties give consumers full control over the visual appearance.
+
+## The Native `<progress>` Element
+
+HTML provides a built-in `<progress>` element, but styling it consistently across browsers is notoriously difficult. Each browser applies its own internal shadow DOM structure, making it nearly impossible to achieve a custom look with CSS alone. This is precisely why a headless approach makes sense: we render a `<div>` with the correct ARIA semantics and let the consumer style it freely.
+
+## ARIA Attributes for Progress
+
+The WAI-ARIA specification defines the `progressbar` role with three key attributes:
+
+| Attribute | Purpose | Example |
+|-----------|---------|---------|
+| `role="progressbar"` | Tells assistive tech this is a progress indicator | Always present |
+| `aria-valuenow` | Current value of the progress | `50` |
+| `aria-valuemin` | Minimum value (start of range) | `0` |
+| `aria-valuemax` | Maximum value (end of range) | `100` |
+| `aria-label` | Human-readable label | `"Uploading file"` |
+
+When the progress is **indeterminate** (e.g., a loading spinner with no known completion), you omit `aria-valuenow` entirely. This signals to screen readers that the operation is in progress but the completion percentage is unknown.
+
+```tsx
+// Determinate: we know it's 60% done
+<div role="progressbar" aria-valuenow={60} aria-valuemin={0} aria-valuemax={100}>
+  60%
+</div>
+
+// Indeterminate: unknown completion
+<div role="progressbar" aria-valuemin={0} aria-valuemax={100}>
+  Loading...
+</div>
+```
+
+## Designing the Component API
+
+Our headless Progress component exposes two sub-components following the compound component pattern:
+
+- **`Progress.Root`** — The outer container with ARIA attributes.
+- **`Progress.Indicator`** — The visual fill that represents the current value.
+
+```tsx
+interface ProgressProps {
+  value?: number | null;  // null = indeterminate
+  min?: number;           // default: 0
+  max?: number;           // default: 100
+}
+```
+
+When `value` is `null` or `undefined`, the component enters indeterminate mode.
+
+## CSS Custom Properties as a Styling Hook
+
+Instead of applying inline styles directly, we expose a CSS custom property `--progress-value` on the root element. This allows consumers to use it in their stylesheets without coupling to any specific CSS framework.
+
+```tsx
+function ProgressRoot({ value, min = 0, max = 100, children, ...props }) {
+  const percentage = value != null
+    ? Math.round(((value - min) / (max - min)) * 100)
+    : null;
+
+  return (
+    <div
+      role="progressbar"
+      aria-valuenow={value ?? undefined}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      data-state={value == null ? "indeterminate" : "determinate"}
+      style={{ "--progress-value": percentage != null ? `${percentage}%` : undefined } as React.CSSProperties}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+The consumer can then write CSS like this:
+
+```css
+.progress-indicator {
+  width: var(--progress-value, 0%);
+  transition: width 300ms ease;
+}
+```
+
+## Data Attributes for State
+
+Following the Base UI convention, we expose `data-state` to enable CSS-only styling without JavaScript class toggling:
+
+- `data-state="determinate"` — When a concrete value is provided.
+- `data-state="indeterminate"` — When the value is unknown.
+
+This pattern is consistent across all Base UI components and allows consumers to write selectors like:
+
+```css
+[data-state="indeterminate"] .progress-indicator {
+  animation: indeterminate-pulse 1.5s infinite;
+}
+```
+
+## Implementation Walkthrough
+
+Here is the full implementation of the Progress component:
+
+```tsx
+import * as React from "react";
+
+interface ProgressContextValue {
+  value: number | null;
+  min: number;
+  max: number;
+  percentage: number | null;
+}
+
+const ProgressContext = React.createContext<ProgressContextValue | null>(null);
+
+function useProgressContext() {
+  const ctx = React.useContext(ProgressContext);
+  if (!ctx) throw new Error("Progress sub-components must be used within Progress.Root");
+  return ctx;
+}
+
+function Root({
+  value = null,
+  min = 0,
+  max = 100,
+  children,
+  ...props
+}: ProgressProps & React.ComponentPropsWithoutRef<"div">) {
+  const percentage = value != null
+    ? Math.round(((value - min) / (max - min)) * 100)
+    : null;
+
+  const ctx = React.useMemo(() => ({ value, min, max, percentage }), [value, min, max, percentage]);
+
+  return (
+    <ProgressContext value={ctx}>
+      <div
+        role="progressbar"
+        aria-valuenow={value ?? undefined}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        data-state={value == null ? "indeterminate" : "determinate"}
+        style={{ "--progress-value": percentage != null ? `${percentage}%` : undefined } as React.CSSProperties}
+        {...props}
+      >
+        {children}
+      </div>
+    </ProgressContext>
+  );
+}
+
+function Indicator(props: React.ComponentPropsWithoutRef<"div">) {
+  const { percentage } = useProgressContext();
+
+  return (
+    <div
+      data-state={percentage == null ? "indeterminate" : "determinate"}
+      style={{ width: percentage != null ? `${percentage}%` : undefined }}
+      {...props}
+    />
+  );
+}
+
+export const Progress = { Root, Indicator };
+```
+
+## Key Takeaways
+
+1. **Use `role="progressbar"`** with `aria-valuenow`, `aria-valuemin`, and `aria-valuemax` for determinate progress.
+2. **Omit `aria-valuenow`** for indeterminate states so screen readers announce "loading" rather than "0%".
+3. **Expose CSS custom properties** like `--progress-value` to decouple styling from component internals.
+4. **Use `data-state`** attributes for CSS-only conditional styling without JavaScript.
+5. **Clamp and calculate percentage** internally so the consumer only needs to pass raw values.
+
+## Try It Yourself
+
+<Exercise id="progress-basic" />

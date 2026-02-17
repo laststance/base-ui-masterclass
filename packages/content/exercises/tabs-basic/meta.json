@@ -1,0 +1,29 @@
+{
+  "id": "tabs-basic",
+  "title": {
+    "en": "Build a Tabs Component",
+    "ja": "Tabsコンポーネントを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "06-navigation",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Use React.useState to track the selectedValue and React.useRef(new Map()) for tab element references",
+      "Tabs.List needs role='tablist', Tabs.Tab needs role='tab', Tabs.Panel needs role='tabpanel'",
+      "Set aria-selected='true' on the selected tab, 'false' on others",
+      "Use roving tabindex: selected tab gets tabIndex=0, others get tabIndex=-1",
+      "For automatic activation, arrow keys should both move focus AND select the tab",
+      "Only render the panel whose value matches selectedValue (lazy rendering)"
+    ],
+    "ja": [
+      "React.useStateでselectedValueを、React.useRef(new Map())でタブ要素の参照を管理します",
+      "Tabs.ListにはRole='tablist'、Tabs.TabにはRole='tab'、Tabs.PanelにはRole='tabpanel'が必要です",
+      "選択されたタブにaria-selected='true'、それ以外に'false'を設定します",
+      "Roving tabindex: 選択されたタブはtabIndex=0、それ以外はtabIndex=-1",
+      "自動アクティベーションでは、矢印キーでフォーカス移動とタブ選択の両方を行います",
+      "selectedValueと一致するvalueのパネルのみレンダリングします（遅延レンダリング）"
+    ]
+  },
+  "dependencies": {}
+}

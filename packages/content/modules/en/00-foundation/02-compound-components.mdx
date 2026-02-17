@@ -1,0 +1,304 @@
+---
+title: "Compound Components Deep Dive"
+description: "Master the compound component pattern — the architectural foundation of every headless UI library. Learn how Root, Context, and Subcomponents work together to create flexible, composable APIs."
+order: 2
+isFree: true
+---
+
+# Compound Components Deep Dive
+
+Every modern headless UI library — Base UI, Radix, Ark UI — is built on a single architectural idea: **compound components**. If you understand this pattern deeply, you can build any component in this course. If you skip it, every lesson that follows will feel like magic you cannot control.
+
+## What Is a Compound Component?
+
+A compound component is a set of components that **share implicit state** through React Context, but expose an **explicit, declarative API** to the consumer. Think of the native HTML `<select>` and `<option>` elements — they don't work alone, but together they form a single coherent widget.
+
+```tsx
+{/* Native HTML compound element */}
+<select>
+  <option value="a">Alpha</option>
+  <option value="b">Bravo</option>
+</select>
+
+{/* Base UI compound component — same idea */}
+<Accordion.Root>
+  <Accordion.Item value="item-1">
+    <Accordion.Header>
+      <Accordion.Trigger>Section One</Accordion.Trigger>
+    </Accordion.Header>
+    <Accordion.Panel>Content for section one.</Accordion.Panel>
+  </Accordion.Item>
+</Accordion.Root>
+```
+
+The consumer never calls `setState` or passes callback props between siblings. The **Root** owns the state, and every **Subcomponent** reads or writes it via Context.
+
+## The Three Pillars
+
+| Pillar | Role | Example |
+|--------|------|---------|
+| **Root** | Owns state, provides Context | `Accordion.Root` |
+| **Context** | Invisible bridge between Root and children | `AccordionContext` (internal) |
+| **Subcomponents** | Consume Context, render UI | `Accordion.Item`, `Accordion.Trigger`, `Accordion.Panel` |
+
+This separation is what makes headless libraries headless — the Root manages behavior, the Subcomponents render whatever markup and styling the consumer wants.
+
+## Building a Compound Accordion from Scratch
+
+Let's implement a minimal Accordion to see every moving part. We will build four pieces: the **Context**, the **Root**, the **Item**, the **Trigger**, and the **Panel**.
+
+### Step 1 — Define the Context
+
+The context carries the shared state that all subcomponents need. For an accordion, that means knowing which items are expanded and providing a function to toggle them.
+
+```tsx
+import * as React from "react";
+
+interface AccordionContextValue {
+  expandedItems: string[];
+  toggleItem: (value: string) => void;
+}
+
+const AccordionContext = React.createContext<AccordionContextValue | null>(null);
+
+/**
+ * Hook to consume the Accordion context.
+ * Throws an error if used outside of Accordion.Root.
+ *
+ * @example
+ * const { expandedItems, toggleItem } = useAccordionContext();
+ */
+function useAccordionContext(): AccordionContextValue {
+  const context = React.useContext(AccordionContext);
+  if (context === null) {
+    throw new Error(
+      "Accordion compound components must be rendered inside <Accordion.Root>."
+    );
+  }
+  return context;
+}
+```
+
+> **Why throw an error?** Failing silently when a subcomponent is rendered outside its Root leads to invisible bugs. An explicit error message saves hours of debugging.
+
+### Step 2 — The Root Component
+
+The Root is responsible for **state ownership** and **providing context**.
+
+```tsx
+interface RootProps {
+  /** Items that are expanded on mount (uncontrolled). */
+  defaultValue?: string[];
+  /** Allow multiple items to be expanded simultaneously. */
+  multiple?: boolean;
+  children: React.ReactNode;
+}
+
+/**
+ * The root container for an Accordion.
+ * Manages expanded state and provides context to subcomponents.
+ *
+ * @example
+ * <Accordion.Root defaultValue={["item-1"]}>
+ *   <Accordion.Item value="item-1">...</Accordion.Item>
+ * </Accordion.Root>
+ */
+function Root({ defaultValue = [], multiple = false, children }: RootProps) {
+  const [expandedItems, setExpandedItems] =
+    React.useState<string[]>(defaultValue);
+
+  const toggleItem = React.useCallback(
+    (value: string) => {
+      setExpandedItems((prev) => {
+        if (prev.includes(value)) {
+          return prev.filter((v) => v !== value);
+        }
+        return multiple ? [...prev, value] : [value];
+      });
+    },
+    [multiple]
+  );
+
+  const contextValue = React.useMemo(
+    () => ({ expandedItems, toggleItem }),
+    [expandedItems, toggleItem]
+  );
+
+  return (
+    <AccordionContext.Provider value={contextValue}>
+      <div data-accordion-root="">{children}</div>
+    </AccordionContext.Provider>
+  );
+}
+```
+
+Notice how `Root` never renders any visual chrome. It renders a plain `<div>` (or could render nothing at all). This is why it's "headless."
+
+### Step 3 — Item Context and the Item Component
+
+Each Item needs its own context so that Trigger and Panel know **which** item they belong to.
+
+```tsx
+interface ItemContextValue {
+  value: string;
+  isExpanded: boolean;
+}
+
+const ItemContext = React.createContext<ItemContextValue | null>(null);
+
+function useItemContext(): ItemContextValue {
+  const context = React.useContext(ItemContext);
+  if (context === null) {
+    throw new Error("Accordion.Trigger/Panel must be inside <Accordion.Item>.");
+  }
+  return context;
+}
+
+interface ItemProps {
+  value: string;
+  children: React.ReactNode;
+}
+
+/**
+ * A single collapsible section within the Accordion.
+ *
+ * @example
+ * <Accordion.Item value="faq-1">
+ *   <Accordion.Trigger>Question</Accordion.Trigger>
+ *   <Accordion.Panel>Answer</Accordion.Panel>
+ * </Accordion.Item>
+ */
+function Item({ value, children }: ItemProps) {
+  const { expandedItems } = useAccordionContext();
+  const isExpanded = expandedItems.includes(value);
+
+  const contextValue = React.useMemo(
+    () => ({ value, isExpanded }),
+    [value, isExpanded]
+  );
+
+  return (
+    <ItemContext.Provider value={contextValue}>
+      <div data-accordion-item="" data-state={isExpanded ? "open" : "closed"}>
+        {children}
+      </div>
+    </ItemContext.Provider>
+  );
+}
+```
+
+### Step 4 — Trigger and Panel
+
+These are the **leaf** components. They consume context and render interactive elements.
+
+```tsx
+/**
+ * The clickable element that toggles an Accordion.Item.
+ *
+ * @example
+ * <Accordion.Trigger>Click to expand</Accordion.Trigger>
+ */
+function Trigger({ children }: { children: React.ReactNode }) {
+  const { toggleItem } = useAccordionContext();
+  const { value, isExpanded } = useItemContext();
+
+  return (
+    <button
+      type="button"
+      aria-expanded={isExpanded}
+      onClick={() => toggleItem(value)}
+      data-accordion-trigger=""
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The collapsible content area of an Accordion.Item.
+ *
+ * @example
+ * <Accordion.Panel>This content is shown when expanded.</Accordion.Panel>
+ */
+function Panel({ children }: { children: React.ReactNode }) {
+  const { isExpanded } = useItemContext();
+
+  if (!isExpanded) return null;
+
+  return (
+    <div role="region" data-accordion-panel="">
+      {children}
+    </div>
+  );
+}
+```
+
+### Step 5 — Export as a Namespace
+
+Base UI uses the `Accordion.Root` / `Accordion.Trigger` pattern. This is achieved by exporting an object (or using a namespace re-export).
+
+```tsx
+export const Accordion = {
+  Root,
+  Item,
+  Trigger,
+  Panel,
+};
+```
+
+Now the consumer writes:
+
+```tsx
+<Accordion.Root defaultValue={["faq-1"]} multiple>
+  <Accordion.Item value="faq-1">
+    <Accordion.Trigger>What is Base UI?</Accordion.Trigger>
+    <Accordion.Panel>
+      Base UI is an unstyled, accessible component library.
+    </Accordion.Panel>
+  </Accordion.Item>
+  <Accordion.Item value="faq-2">
+    <Accordion.Trigger>Is it free?</Accordion.Trigger>
+    <Accordion.Panel>Yes, it is MIT-licensed.</Accordion.Panel>
+  </Accordion.Item>
+</Accordion.Root>
+```
+
+## Why This Pattern Matters
+
+| Benefit | Explanation |
+|---------|-------------|
+| **Inversion of control** | The consumer decides the markup and layout, not the library |
+| **Implicit state sharing** | No prop-drilling, no render-prop chains |
+| **Co-location** | Related UI lives together in JSX; no distant config objects |
+| **Accessibility by default** | The library wires `aria-expanded`, `role`, keyboard events internally |
+| **Styling freedom** | Data attributes (`data-state="open"`) enable CSS-only styling without JS callbacks |
+
+## Common Mistakes
+
+1. **Forgetting `useMemo` on context values** — Without memoization, every render creates a new object reference, causing all consumers to re-render even if nothing changed.
+
+2. **Not validating the context** — If `useContext` returns `null` and you don't throw, you get cryptic `Cannot read property of null` errors instead of a helpful message.
+
+3. **Coupling state to the wrong level** — The Root should own the *shared* state (which items are expanded). The Item should own only item-level derived state (am I expanded?). Mixing these levels makes the component fragile.
+
+## How Base UI Extends This
+
+Base UI's real implementation adds several layers on top of what we built:
+
+- **Controlled & uncontrolled** modes via `value` / `defaultValue` / `onValueChange` props
+- **`render` prop** for polymorphic rendering — any subcomponent can render as a custom element
+- **`data-*` attributes** for styling hooks (`data-state`, `data-disabled`, `data-orientation`)
+- **Keyboard navigation** (Arrow keys, Home, End) managed inside the Root
+- **TypeScript generics** for type-safe value constraints (covered in the next lesson)
+
+In the modules ahead, you will build each of these layers yourself, one component at a time.
+
+## Exercise
+
+Before moving on, try extending the Accordion we built:
+
+1. Add a `disabled` prop to `Accordion.Item` that prevents toggling.
+2. Add `aria-controls` and `id` attributes to link Trigger and Panel for screen readers.
+3. Add keyboard support: pressing `Enter` or `Space` on the Trigger should toggle the Panel.
+
+These three additions will give you a feel for the accessibility work that headless libraries handle for every single component.

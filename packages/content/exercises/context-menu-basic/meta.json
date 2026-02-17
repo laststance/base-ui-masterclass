@@ -1,0 +1,29 @@
+{
+  "id": "context-menu-basic",
+  "title": {
+    "en": "Build a ContextMenu Component",
+    "ja": "ContextMenuコンポーネントを構築する"
+  },
+  "difficulty": "advanced",
+  "module": "10-menus",
+  "order": 3,
+  "hints": {
+    "en": [
+      "The trigger area listens for the 'contextmenu' event (right-click) and calls e.preventDefault()",
+      "Store the pointer position from e.clientX and e.clientY to position the menu with position: fixed",
+      "The popup uses the same role='menu' and role='menuitem' structure as a regular Menu",
+      "When the menu opens, move DOM focus to the first item using requestAnimationFrame",
+      "ArrowDown/ArrowUp wrap around, Home/End jump to first/last, Escape closes the menu",
+      "Enter/Space on a menu item calls onSelect and closes the context menu"
+    ],
+    "ja": [
+      "トリガー領域は'contextmenu'イベント（右クリック）をリッスンしe.preventDefault()を呼びます",
+      "e.clientXとe.clientYからポインタ位置を保存し、position: fixedでメニューを配置します",
+      "ポップアップは通常のMenuと同じrole='menu'とrole='menuitem'構造を使います",
+      "メニューが開いたらrequestAnimationFrameで最初の項目にDOMフォーカスを移動します",
+      "ArrowDown/ArrowUpはラップ、Home/Endは最初/最後にジャンプ、Escapeで閉じます",
+      "メニュー項目でEnter/SpaceはonSelectを呼び出しコンテキストメニューを閉じます"
+    ]
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,247 @@
+---
+title: "Building a Headless Switch"
+description: "Build a headless Switch component with role='switch', aria-checked, keyboard toggle support, and the useControllableState hook."
+order: 2
+isFree: false
+---
+
+# Building a Headless Switch
+
+The Switch is your first component that uses `useControllableState`. It also introduces **ARIA roles** and **keyboard interaction** -- two concepts that every interactive component needs.
+
+## What Makes a Switch a Switch?
+
+From the WAI-ARIA specification, a switch is a toggle that represents an on/off state:
+
+| Attribute | Value | Purpose |
+|-----------|-------|---------|
+| `role` | `"switch"` | Tells screen readers this is a toggle, not a regular button |
+| `aria-checked` | `true` or `false` | Communicates the current state |
+| Keyboard | Space and Enter | Toggles the state |
+
+Without these, a `<button>` that toggles a boolean is just a button. With them, it is a first-class accessible switch.
+
+## Step 1: Define the Props
+
+```tsx
+import * as React from "react";
+
+interface SwitchProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  /** Controlled checked state */
+  checked?: boolean;
+  /** Initial checked state for uncontrolled mode */
+  defaultChecked?: boolean;
+  /** Callback fired when the checked state changes */
+  onCheckedChange?: (checked: boolean) => void;
+  /** Optional render prop */
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+We omit `onChange` from button props to avoid conflict with `onCheckedChange`. The naming convention `onXxxChange` is used throughout Base UI.
+
+## Step 2: Use useControllableState
+
+```tsx
+export function Switch({
+  checked: controlledChecked,
+  defaultChecked = false,
+  onCheckedChange,
+  disabled,
+  render,
+  ref,
+  ...props
+}: SwitchProps) {
+  const [checked, setChecked] = useControllableState({
+    value: controlledChecked,
+    defaultValue: defaultChecked,
+    onChange: onCheckedChange,
+  });
+
+  const toggle = () => {
+    if (!disabled) {
+      setChecked(!checked);
+    }
+  };
+```
+
+The `toggle` function is dead simple because `useControllableState` handles both modes. We just flip the boolean.
+
+## Step 3: Handle Keyboard Interaction
+
+The WAI-ARIA switch pattern requires Space and Enter to toggle:
+
+```tsx
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      toggle();
+    }
+    props.onKeyDown?.(e);
+  };
+```
+
+Wait -- native `<button>` elements already fire `onClick` on Space and Enter. So if we handle `onClick`, do we need `onKeyDown`?
+
+**Yes and no.** When using the default `<button>`, the keyboard handling is free. But when using a render prop with a `<div>` or `<span>`, there is no native keyboard support. Adding explicit `onKeyDown` makes the component work regardless of the underlying element.
+
+## Step 4: Assemble the Component
+
+```tsx
+  const dataAttributes = {
+    "data-checked": checked || undefined,
+    "data-unchecked": !checked || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    role: "switch" as const,
+    "aria-checked": checked,
+    disabled,
+    onClick: toggle,
+    onKeyDown: handleKeyDown,
+    ...dataAttributes,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button type="button" {...elementProps} />;
+}
+```
+
+### Why `type="button"`?
+
+Inside a `<form>`, a `<button>` without `type` defaults to `type="submit"`, which submits the form on click. Always set `type="button"` for non-submit buttons.
+
+## The Complete Component
+
+```tsx
+import * as React from "react";
+import { useControllableState } from "./use-controllable-state";
+
+interface SwitchProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  checked?: boolean;
+  defaultChecked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+
+export function Switch({
+  checked: controlledChecked,
+  defaultChecked = false,
+  onCheckedChange,
+  disabled,
+  render,
+  ref,
+  ...props
+}: SwitchProps) {
+  const [checked, setChecked] = useControllableState({
+    value: controlledChecked,
+    defaultValue: defaultChecked,
+    onChange: onCheckedChange,
+  });
+
+  const toggle = () => {
+    if (!disabled) {
+      setChecked(!checked);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      toggle();
+    }
+    props.onKeyDown?.(e);
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    role: "switch" as const,
+    "aria-checked": checked,
+    disabled,
+    type: "button" as const,
+    onClick: toggle,
+    onKeyDown: handleKeyDown,
+    "data-checked": checked || undefined,
+    "data-unchecked": !checked || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+## Styling with Data Attributes
+
+```css
+/* Track */
+.switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--color-neutral-300);
+  transition: background 150ms;
+}
+
+.switch[data-checked] {
+  background: var(--color-primary-500);
+}
+
+.switch[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+## Usage Examples
+
+### Uncontrolled
+
+```tsx
+<Switch defaultChecked={false}>
+  Dark mode
+</Switch>
+```
+
+### Controlled
+
+```tsx
+function Settings() {
+  const [darkMode, setDarkMode] = React.useState(false);
+
+  return (
+    <Switch
+      checked={darkMode}
+      onCheckedChange={setDarkMode}
+    >
+      Dark mode
+    </Switch>
+  );
+}
+```
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| `role="switch"` | Tells assistive technology this is a toggle |
+| `aria-checked` | Communicates on/off state |
+| `useControllableState` | Handles controlled/uncontrolled in one line |
+| Keyboard handling | Space and Enter toggle regardless of underlying element |
+| `type="button"` | Prevents accidental form submission |
+
+The Switch is a gateway to more complex toggleable components. Next up: Toggle and ToggleGroup, where we introduce React Context for group state management.
+
+<Exercise id="switch-basic" />

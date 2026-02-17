@@ -1,0 +1,32 @@
+{
+  "common": {
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "backToModules": "Back to Modules",
+    "nextLesson": "Next Lesson",
+    "previousLesson": "Previous Lesson",
+    "free": "Free",
+    "premium": "Premium",
+    "lessons": "Lessons",
+    "components": "Components",
+    "progress": "Progress",
+    "complete": "Complete"
+  },
+  "course": {
+    "allModules": "All Modules",
+    "moduleOverview": "Module Overview",
+    "lessonOf": "Lesson {current} of {total}",
+    "startLesson": "Start Lesson",
+    "continueLearning": "Continue Learning",
+    "completedBadge": "Completed",
+    "lockedBadge": "Purchase Required"
+  },
+  "paywall": {
+    "signInTitle": "Sign in to access this lesson",
+    "signInDescription": "This is a premium lesson. Sign in with your account and verify your license to continue.",
+    "purchaseTitle": "Purchase Required",
+    "purchaseDescription": "Get lifetime access to all 35 components, 45 lessons, and the Discord community.",
+    "buyNow": "Buy Now",
+    "enterLicense": "Already purchased? Enter your license key"
+  }
+}
