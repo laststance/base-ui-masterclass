@@ -1,0 +1,382 @@
+---
+title: "プロジェクトセットアップ"
+description: "コース全体を通して構築するコンポーネントライブラリプロジェクトをセットアップします。npm initからTypeScript設定、開発準備の整ったクリーンなファイル構造まで。"
+order: 4
+isFree: true
+---
+
+# プロジェクトセットアップ
+
+このレッスンでは、コースの残りで使用するプロジェクトをセットアップします。最終的に、完全に設定されたTypeScriptコンポーネントライブラリが、クリーンなディレクトリ構造とともに準備され、最初のヘッドレスコンポーネントの構築を開始できます。
+
+## 何を構築するか
+
+プロジェクトは以下の特徴を持つ**モノレポスタイルのコンポーネントライブラリ**です：
+
+| 項目 | 選択 | 理由 |
+|------|------|------|
+| パッケージマネージャー | pnpm | 高速、ディスク効率的、厳密な依存関係解決 |
+| 言語 | TypeScript（strictモード） | ジェネリクス、推論、型安全なAPIはヘッドレスUIに不可欠 |
+| ビルドツール | tsup | esbuildを利用したゼロコンフィグTypeScriptバンドラー |
+| テスト | Vitest + Testing Library | React DOMテスト対応の高速ユニットテスト |
+| リンティング | ESLint + Prettier | 全コンポーネントで一貫したコードスタイル |
+
+## ステップ1 — プロジェクトの初期化
+
+新しいディレクトリを作成し、pnpmで初期化します。
+
+```bash
+mkdir headless-ui-library
+cd headless-ui-library
+pnpm init
+```
+
+これで `package.json` が作成されます。以下のフィールドで更新してください：
+
+```json
+{
+  "name": "@your-scope/headless-ui",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./accordion": {
+      "import": "./dist/accordion/index.js",
+      "types": "./dist/accordion/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}
+```
+
+> **なぜ`peerDependencies`？** コンポーネントライブラリはReactをバンドルすべきではありません — 利用者のアプリケーションが既にReactを持っています。ピア依存関係により、ランタイムでReactが単一コピーで使用されることが保証されます。
+
+## ステップ2 — 依存関係のインストール
+
+```bash
+# コアのピア依存関係（ローカル開発用にdevとしてインストール）
+pnpm add -D react react-dom @types/react @types/react-dom
+
+# TypeScript
+pnpm add -D typescript
+
+# ビルドツール
+pnpm add -D tsup
+
+# テスト
+pnpm add -D vitest @testing-library/react @testing-library/jest-dom jsdom
+
+# リンティング
+pnpm add -D eslint prettier eslint-config-prettier @typescript-eslint/parser @typescript-eslint/eslint-plugin
+```
+
+## ステップ3 — TypeScript設定
+
+プロジェクトルートに `tsconfig.json` を作成します：
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]
+}
+```
+
+主要設定の解説：
+
+| オプション | 値 | 目的 |
+|-----------|---|------|
+| `strict: true` | すべてのstrictチェックを有効化 | 型エラーを早期にキャッチ、ライブラリには必須 |
+| `jsx: "react-jsx"` | React 17+トランスフォーム | 全ファイルでReactのimportが不要 |
+| `moduleResolution: "bundler"` | モダンな解決方式 | package.jsonの`exports`フィールドに対応 |
+| `declaration: true` | `.d.ts`ファイルを生成 | 利用者が型情報を取得可能 |
+| `declarationMap: true` | 宣言をソースにマッピング | 「定義へ移動」が`.d.ts`ではなく`.tsx`ソースにジャンプ |
+
+## ステップ4 — ビルド設定
+
+`tsup.config.ts` を作成します：
+
+```ts
+import { defineConfig } from "tsup";
+
+/**
+ * コンポーネントライブラリのビルド設定。
+ * TypeScript宣言付きのESM出力を生成します。
+ *
+ * @example
+ * pnpm build    # 単回ビルド
+ * pnpm dev      # ウォッチモード
+ */
+export default defineConfig({
+  entry: {
+    index: "src/index.ts",
+    "accordion/index": "src/accordion/index.ts",
+  },
+  format: ["esm"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  external: ["react", "react-dom"],
+  treeshake: true,
+});
+```
+
+コンポーネントを追加するたびに、`entry`オブジェクトに新しいエントリを追加します。各コンポーネントは独自のエントリポイントを持つため、利用者は必要なものだけをインポートできます：
+
+```tsx
+// 利用者はAccordionのみインポート — 他のコンポーネントのコードは含まれない
+import { Accordion } from "@your-scope/headless-ui/accordion";
+```
+
+## ステップ5 — テスト設定
+
+`vitest.config.ts` を作成します：
+
+```ts
+import { defineConfig } from "vitest/config";
+import path from "node:path";
+
+/**
+ * コンポーネントテストのVitest設定。
+ * ブラウザ環境をシミュレートするためにjsdomを使用します。
+ *
+ * @example
+ * pnpm test        # ウォッチモード
+ * pnpm test:run    # 単回実行（CI用）
+ */
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+});
+```
+
+テストセットアップファイルを `src/test-setup.ts` に作成します：
+
+```ts
+import "@testing-library/jest-dom/vitest";
+```
+
+このシングルインポートにより、`toBeInTheDocument()`、`toHaveAttribute()`、`toBeVisible()`などのマッチャーがすべてのテストファイルで使用可能になります。
+
+## ステップ6 — ディレクトリ構造
+
+以下のディレクトリ構造を作成します：
+
+```
+headless-ui-library/
+├── src/
+│   ├── accordion/
+│   │   ├── accordion-context.ts
+│   │   ├── accordion-root.tsx
+│   │   ├── accordion-item.tsx
+│   │   ├── accordion-trigger.tsx
+│   │   ├── accordion-panel.tsx
+│   │   ├── accordion.test.tsx
+│   │   └── index.ts
+│   ├── utils/
+│   │   ├── use-controllable-state.ts
+│   │   ├── use-id.ts
+│   │   ├── compose-refs.ts
+│   │   └── index.ts
+│   ├── test-setup.ts
+│   └── index.ts
+├── tsconfig.json
+├── tsup.config.ts
+├── vitest.config.ts
+├── package.json
+└── .gitignore
+```
+
+ディレクトリを作成します：
+
+```bash
+mkdir -p src/accordion src/utils
+```
+
+### ルートの `src/index.ts`
+
+このファイルですべてのコンポーネントを再エクスポートします：
+
+```ts
+export { Accordion } from "./accordion";
+```
+
+### コンポーネントの `src/accordion/index.ts`
+
+各コンポーネントフォルダには独自のバレルファイルがあります：
+
+```ts
+export { Root } from "./accordion-root";
+export { Item } from "./accordion-item";
+export { Trigger } from "./accordion-trigger";
+export { Panel } from "./accordion-panel";
+
+// Accordion.Rootパターンのための名前空間エクスポート
+import { Root } from "./accordion-root";
+import { Item } from "./accordion-item";
+import { Trigger } from "./accordion-trigger";
+import { Panel } from "./accordion-panel";
+
+export const Accordion = { Root, Item, Trigger, Panel };
+```
+
+## ステップ7 — 共有ユーティリティ
+
+すべてのコンポーネントにいくつかの基礎的なフックが必要です。`src/utils/` に作成します：
+
+### `use-controllable-state.ts`
+
+このフックはすべてのコンポーネントのバックボーンです — 制御・非制御両方の使用パターンをサポートします。
+
+```tsx
+import * as React from "react";
+
+interface UseControllableStateParams<T> {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}
+
+/**
+ * 制御または非制御のいずれかの状態を管理します。
+ * `value`が提供された場合、コンポーネントは制御されます。
+ * そうでなければ、`defaultValue`による内部状態が使用されます。
+ *
+ * @example
+ * const [isOpen, setIsOpen] = useControllableState({
+ *   value: props.open,
+ *   defaultValue: false,
+ *   onChange: props.onOpenChange,
+ * });
+ */
+export function useControllableState<T>({
+  value,
+  defaultValue,
+  onChange,
+}: UseControllableStateParams<T>): [T, (nextValue: T) => void] {
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+  const isControlled = value !== undefined;
+  const currentValue = isControlled ? value : internalValue;
+
+  const setValue = React.useCallback(
+    (nextValue: T) => {
+      if (!isControlled) {
+        setInternalValue(nextValue);
+      }
+      onChange?.(nextValue);
+    },
+    [isControlled, onChange]
+  );
+
+  return [currentValue, setValue];
+}
+```
+
+### `use-id.ts`
+
+ARIA属性用のユニークIDを生成します：
+
+```tsx
+import * as React from "react";
+
+/**
+ * アクセシビリティ属性用の安定したユニークIDを生成します。
+ * 内部でReact.useId（React 18+）を使用します。
+ *
+ * @example
+ * const triggerId = useId("accordion-trigger");
+ * // "accordion-trigger-:r1:" のようなものを返す
+ */
+export function useId(prefix: string): string {
+  const reactId = React.useId();
+  return `${prefix}-${reactId}`;
+}
+```
+
+## ステップ8 — セットアップの確認
+
+以下のコマンドを実行して、すべてが正常に動作することを確認します：
+
+```bash
+# TypeScriptがエラーなしでコンパイル
+pnpm typecheck
+
+# ビルドがdist/に出力を生成
+pnpm build
+
+# テストが通る（テストを書くまで0テストと報告される）
+pnpm test:run
+```
+
+3つのコマンドすべてが成功すれば、プロジェクトの準備は完了です。
+
+## 次のステップ
+
+この基盤が整ったら、最初の実際のコンポーネントを構築する準備ができています。モジュール1では**Accordion**から始めます — コンパウンドコンポーネントのレッスンでスケッチしたすべての機能を、完全なアクセシビリティ、キーボードナビゲーション、制御・非制御サポートとともに実装します。
+
+コース内のすべてのコンポーネントは同じファイル構造に従います：
+
+```
+src/{component-name}/
+├── {component-name}-context.ts    # Context定義
+├── {component-name}-root.tsx      # Rootコンポーネント
+├── {component-name}-{part}.tsx    # サブコンポーネント
+├── {component-name}.test.tsx      # テスト
+└── index.ts                       # バレルエクスポート
+```
+
+この一貫性により、数十のコンポーネントを追加しても、コードベースは予測可能で簡単にナビゲートできます。
+
+## チェックリスト
+
+モジュール1に進む前に確認してください：
+
+- [ ] `pnpm typecheck` がエラーゼロで通る
+- [ ] `pnpm build` が `dist/` にファイルを生成する
+- [ ] `pnpm test:run` がクラッシュなしで実行される
+- [ ] `src/accordion/` ディレクトリがプレースホルダーファイルとともに存在する
+- [ ] `src/utils/` ディレクトリに `use-controllable-state.ts` と `use-id.ts` が含まれている

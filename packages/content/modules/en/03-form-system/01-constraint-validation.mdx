@@ -1,0 +1,224 @@
+---
+title: "HTML Constraint Validation API"
+description: "Master the browser's built-in Constraint Validation API -- validity states, custom validation messages, and setCustomValidity -- before building custom form components."
+order: 1
+isFree: false
+---
+
+# HTML Constraint Validation API
+
+Before building custom Form and Field components, you need to understand what the browser gives you for free. The **Constraint Validation API** is a built-in browser feature that validates form inputs without any JavaScript library. Base UI builds directly on top of it.
+
+## Why Not Just Use Zod or Yup?
+
+Schema validation libraries are powerful, but they run **outside** the browser's native validation system. The Constraint Validation API gives you:
+
+1. **Free validation** for `required`, `minlength`, `maxlength`, `pattern`, `min`, `max`, `type="email"`, etc.
+2. **Native error UI** (browser tooltips) as a fallback
+3. **`:invalid` and `:valid` CSS pseudo-classes** without any JavaScript
+4. **Form submission blocking** -- invalid forms cannot be submitted natively
+5. **Accessibility** -- screen readers announce validation errors automatically
+
+Base UI does not replace this API. It wraps it, exposes it through data attributes, and adds the missing pieces (like custom error messages and field-level composition).
+
+## The ValidityState Object
+
+Every form element has a `validity` property that returns a `ValidityState` object:
+
+```tsx
+const input = document.querySelector("input");
+console.log(input.validity);
+```
+
+| Property | Triggered by | Example |
+|----------|-------------|---------|
+| `valueMissing` | `required` | Empty required field |
+| `typeMismatch` | `type="email"`, `type="url"` | Invalid email format |
+| `patternMismatch` | `pattern="..."` | Does not match regex |
+| `tooShort` | `minlength` | Fewer characters than minimum |
+| `tooLong` | `maxlength` | More characters than maximum |
+| `rangeUnderflow` | `min` | Number below minimum |
+| `rangeOverflow` | `max` | Number above maximum |
+| `stepMismatch` | `step` | Number not aligned to step |
+| `badInput` | Browser-specific | Non-numeric input in number field |
+| `customError` | `setCustomValidity()` | Custom validation logic |
+| `valid` | None of the above | All constraints pass |
+
+## Checking Validity in Code
+
+```tsx
+function validateEmail() {
+  const input = document.getElementById("email") as HTMLInputElement;
+
+  if (input.validity.valueMissing) {
+    console.log("Email is required");
+  } else if (input.validity.typeMismatch) {
+    console.log("Please enter a valid email");
+  } else if (input.validity.valid) {
+    console.log("Email is valid");
+  }
+}
+```
+
+### The `checkValidity()` Method
+
+Returns `true` if the element is valid, `false` otherwise. Also fires an `invalid` event when the element is invalid:
+
+```tsx
+const isValid = input.checkValidity(); // true or false
+```
+
+### The `reportValidity()` Method
+
+Like `checkValidity()`, but also shows the browser's native error tooltip:
+
+```tsx
+input.reportValidity(); // Shows tooltip if invalid
+```
+
+## Custom Validation with setCustomValidity
+
+The built-in constraints do not cover everything. For custom rules (password strength, "confirm password" matching, async username availability), use `setCustomValidity()`:
+
+```tsx
+function validatePasswordMatch() {
+  const password = document.getElementById("password") as HTMLInputElement;
+  const confirm = document.getElementById("confirm") as HTMLInputElement;
+
+  if (password.value !== confirm.value) {
+    confirm.setCustomValidity("Passwords do not match");
+  } else {
+    // Pass an empty string to clear the custom error
+    confirm.setCustomValidity("");
+  }
+}
+```
+
+**Critical detail:** You must pass an **empty string** `""` to clear a custom validity error. Passing anything else -- even `undefined` or `null` -- will not work.
+
+### In React
+
+```tsx
+function ConfirmPassword() {
+  const [password, setPassword] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const confirmRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (confirmRef.current) {
+      if (confirm && password !== confirm) {
+        confirmRef.current.setCustomValidity("Passwords do not match");
+      } else {
+        confirmRef.current.setCustomValidity("");
+      }
+    }
+  }, [password, confirm]);
+
+  return (
+    <form>
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+      />
+      <input
+        ref={confirmRef}
+        type="password"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        required
+      />
+    </form>
+  );
+}
+```
+
+## The `invalid` Event
+
+When `checkValidity()` or form submission detects an invalid field, the browser fires an `invalid` event on that element:
+
+```tsx
+input.addEventListener("invalid", (e) => {
+  // Prevent the browser's default tooltip
+  e.preventDefault();
+
+  // Show our custom error UI instead
+  showError(input.validationMessage);
+});
+```
+
+In React:
+
+```tsx
+<input
+  onInvalid={(e) => {
+    e.preventDefault();
+    setError(e.currentTarget.validationMessage);
+  }}
+  required
+/>
+```
+
+### The `validationMessage` Property
+
+Every form element has a `validationMessage` string that contains the browser's localized error message:
+
+```tsx
+input.validationMessage;
+// "Please fill out this field." (Chrome, English)
+// "Fill in this field" (Firefox, English)
+// "This field is required" (Safari, English)
+```
+
+Base UI reads this message and exposes it through the Field component so you can display it in your own error UI.
+
+## CSS Pseudo-Classes
+
+The browser provides pseudo-classes that match validity state without any JavaScript:
+
+```css
+/* Valid input */
+input:valid {
+  border-color: green;
+}
+
+/* Invalid input */
+input:invalid {
+  border-color: red;
+}
+
+/* Invalid but only after user interaction */
+input:user-invalid {
+  border-color: red;
+}
+```
+
+The `:user-invalid` pseudo-class (supported in modern browsers) is especially useful -- it only matches after the user has interacted with the field, preventing error styles from showing on page load.
+
+## How Base UI Uses This API
+
+Base UI's Field component wraps the Constraint Validation API and exposes it through data attributes:
+
+| Native API | Base UI equivalent |
+|-----------|-------------------|
+| `input.validity.valid` | `data-valid` on Field |
+| `input.validity.*` (any error) | `data-invalid` on Field |
+| `input.validationMessage` | Field.Error children |
+| `:user-invalid` | `data-touched` + `data-invalid` |
+| `setCustomValidity()` | Field.Control `validate` prop |
+
+This bridge between native APIs and React component state is what makes Base UI's form system powerful without being heavy.
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| ValidityState | 10 boolean properties covering all native constraints |
+| `checkValidity()` / `reportValidity()` | Programmatic validation triggers |
+| `setCustomValidity("")` | Custom validation; empty string to clear |
+| `invalid` event | Hook into browser validation flow |
+| `validationMessage` | Browser-localized error text |
+| CSS pseudo-classes | `:valid`, `:invalid`, `:user-invalid` |
+
+With this foundation, you are ready to build the Field component -- which wraps a label, input, description, and error message into a single accessible unit.

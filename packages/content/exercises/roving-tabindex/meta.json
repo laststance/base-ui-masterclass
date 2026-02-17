@@ -1,0 +1,29 @@
+{
+  "id": "roving-tabindex",
+  "title": {
+    "en": "Implement Roving TabIndex Hook",
+    "ja": "Roving TabIndexフックを実装する"
+  },
+  "difficulty": "intermediate",
+  "module": "06-navigation",
+  "order": 1,
+  "hints": {
+    "en": [
+      "Use React.useState to track the activeIndex and React.useRef for element references",
+      "The active item gets tabIndex=0, all others get tabIndex=-1",
+      "For wrapping, use modulo arithmetic: ((next % count) + count) % count",
+      "Call element.focus() after updating the active index to move DOM focus",
+      "The onFocus handler should sync activeIndex when an item is focused via click",
+      "Home key should set index to 0, End key to items.length - 1"
+    ],
+    "ja": [
+      "React.useStateでactiveIndexを、React.useRefで要素参照を管理します",
+      "アクティブな要素はtabIndex=0、それ以外はtabIndex=-1です",
+      "ラッピングにはモジュロ演算を使います: ((next % count) + count) % count",
+      "アクティブインデックスを更新後、element.focus()を呼んでDOMフォーカスを移動します",
+      "onFocusハンドラーはクリックでフォーカスされた時にactiveIndexを同期します",
+      "Homeキーはインデックスを0に、Endキーはitems.length - 1に設定します"
+    ]
+  },
+  "dependencies": {}
+}

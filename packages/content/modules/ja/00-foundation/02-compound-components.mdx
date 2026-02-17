@@ -1,0 +1,304 @@
+---
+title: "コンパウンドコンポーネント詳解"
+description: "ヘッドレスUIライブラリの構造的基盤であるコンパウンドコンポーネントパターンをマスターします。Root、Context、サブコンポーネントがどのように連携して柔軟で合成可能なAPIを作るかを学びます。"
+order: 2
+isFree: true
+---
+
+# コンパウンドコンポーネント詳解
+
+すべてのモダンなヘッドレスUIライブラリ — Base UI、Radix、Ark UI — は、ひとつのアーキテクチャ上のアイデアに基づいて構築されています：**コンパウンドコンポーネント**です。このパターンを深く理解すれば、このコースのどんなコンポーネントも構築できます。スキップすると、以降のすべてのレッスンが制御できない魔法のように感じるでしょう。
+
+## コンパウンドコンポーネントとは？
+
+コンパウンドコンポーネントとは、React Contextを通じて**暗黙的に状態を共有**しつつ、利用者に対して**明示的で宣言的なAPI**を公開するコンポーネントのセットです。ネイティブHTMLの `<select>` と `<option>` 要素を考えてみてください — 単体では機能しませんが、組み合わせることでひとつの一貫したウィジェットを形成します。
+
+```tsx
+{/* ネイティブHTMLのコンパウンド要素 */}
+<select>
+  <option value="a">Alpha</option>
+  <option value="b">Bravo</option>
+</select>
+
+{/* Base UIのコンパウンドコンポーネント — 同じ考え方 */}
+<Accordion.Root>
+  <Accordion.Item value="item-1">
+    <Accordion.Header>
+      <Accordion.Trigger>セクション1</Accordion.Trigger>
+    </Accordion.Header>
+    <Accordion.Panel>セクション1のコンテンツ</Accordion.Panel>
+  </Accordion.Item>
+</Accordion.Root>
+```
+
+利用者は `setState` を呼んだり、兄弟間でコールバックpropsを渡したりしません。**Root**が状態を所有し、すべての**サブコンポーネント**がContextを通じてそれを読み書きします。
+
+## 3つの柱
+
+| 柱 | 役割 | 例 |
+|---|------|---|
+| **Root** | 状態を所有し、Contextを提供 | `Accordion.Root` |
+| **Context** | RootとChildrenの見えない橋渡し | `AccordionContext`（内部） |
+| **サブコンポーネント** | Contextを消費し、UIをレンダリング | `Accordion.Item`, `Accordion.Trigger`, `Accordion.Panel` |
+
+この分離こそが、ヘッドレスライブラリを「ヘッドレス」たらしめるものです — Rootが振る舞いを管理し、サブコンポーネントは利用者が望むマークアップとスタイリングをレンダリングします。
+
+## コンパウンドAccordionをゼロから構築する
+
+最小限のAccordionを実装して、すべての要素を確認しましょう。**Context**、**Root**、**Item**、**Trigger**、**Panel**の4つのパーツを構築します。
+
+### ステップ1 — Contextの定義
+
+Contextは、すべてのサブコンポーネントが必要とする共有状態を運びます。Accordionの場合、どのアイテムが展開されているかを知ること、そしてそれをトグルする関数を提供することを意味します。
+
+```tsx
+import * as React from "react";
+
+interface AccordionContextValue {
+  expandedItems: string[];
+  toggleItem: (value: string) => void;
+}
+
+const AccordionContext = React.createContext<AccordionContextValue | null>(null);
+
+/**
+ * AccordionのContextを消費するフック。
+ * Accordion.Rootの外で使用するとエラーをスローします。
+ *
+ * @example
+ * const { expandedItems, toggleItem } = useAccordionContext();
+ */
+function useAccordionContext(): AccordionContextValue {
+  const context = React.useContext(AccordionContext);
+  if (context === null) {
+    throw new Error(
+      "Accordionのコンパウンドコンポーネントは<Accordion.Root>内でレンダリングする必要があります。"
+    );
+  }
+  return context;
+}
+```
+
+> **なぜエラーをスローするのか？** サブコンポーネントがRoot外でレンダリングされたときにサイレントに失敗すると、見えないバグにつながります。明示的なエラーメッセージが何時間ものデバッグを節約します。
+
+### ステップ2 — Rootコンポーネント
+
+Rootは**状態の所有**と**Contextの提供**を担当します。
+
+```tsx
+interface RootProps {
+  /** マウント時に展開されるアイテム（非制御）。 */
+  defaultValue?: string[];
+  /** 複数のアイテムを同時に展開可能にする。 */
+  multiple?: boolean;
+  children: React.ReactNode;
+}
+
+/**
+ * Accordionのルートコンテナ。
+ * 展開状態を管理し、サブコンポーネントにContextを提供します。
+ *
+ * @example
+ * <Accordion.Root defaultValue={["item-1"]}>
+ *   <Accordion.Item value="item-1">...</Accordion.Item>
+ * </Accordion.Root>
+ */
+function Root({ defaultValue = [], multiple = false, children }: RootProps) {
+  const [expandedItems, setExpandedItems] =
+    React.useState<string[]>(defaultValue);
+
+  const toggleItem = React.useCallback(
+    (value: string) => {
+      setExpandedItems((prev) => {
+        if (prev.includes(value)) {
+          return prev.filter((v) => v !== value);
+        }
+        return multiple ? [...prev, value] : [value];
+      });
+    },
+    [multiple]
+  );
+
+  const contextValue = React.useMemo(
+    () => ({ expandedItems, toggleItem }),
+    [expandedItems, toggleItem]
+  );
+
+  return (
+    <AccordionContext.Provider value={contextValue}>
+      <div data-accordion-root="">{children}</div>
+    </AccordionContext.Provider>
+  );
+}
+```
+
+`Root` はビジュアル的な装飾を一切レンダリングしないことに注目してください。素朴な `<div>` をレンダリングするだけです（何もレンダリングしないことも可能です）。これが「ヘッドレス」である理由です。
+
+### ステップ3 — ItemコンテキストとItemコンポーネント
+
+各Itemは独自のContextが必要です。TriggerとPanelが**どの**Itemに属するかを知るためです。
+
+```tsx
+interface ItemContextValue {
+  value: string;
+  isExpanded: boolean;
+}
+
+const ItemContext = React.createContext<ItemContextValue | null>(null);
+
+function useItemContext(): ItemContextValue {
+  const context = React.useContext(ItemContext);
+  if (context === null) {
+    throw new Error("Accordion.Trigger/Panelは<Accordion.Item>内に配置してください。");
+  }
+  return context;
+}
+
+interface ItemProps {
+  value: string;
+  children: React.ReactNode;
+}
+
+/**
+ * Accordion内の単一の折りたたみ可能なセクション。
+ *
+ * @example
+ * <Accordion.Item value="faq-1">
+ *   <Accordion.Trigger>質問</Accordion.Trigger>
+ *   <Accordion.Panel>回答</Accordion.Panel>
+ * </Accordion.Item>
+ */
+function Item({ value, children }: ItemProps) {
+  const { expandedItems } = useAccordionContext();
+  const isExpanded = expandedItems.includes(value);
+
+  const contextValue = React.useMemo(
+    () => ({ value, isExpanded }),
+    [value, isExpanded]
+  );
+
+  return (
+    <ItemContext.Provider value={contextValue}>
+      <div data-accordion-item="" data-state={isExpanded ? "open" : "closed"}>
+        {children}
+      </div>
+    </ItemContext.Provider>
+  );
+}
+```
+
+### ステップ4 — TriggerとPanel
+
+これらは**リーフ**コンポーネントです。Contextを消費してインタラクティブな要素をレンダリングします。
+
+```tsx
+/**
+ * Accordion.Itemをトグルするクリック可能な要素。
+ *
+ * @example
+ * <Accordion.Trigger>クリックして展開</Accordion.Trigger>
+ */
+function Trigger({ children }: { children: React.ReactNode }) {
+  const { toggleItem } = useAccordionContext();
+  const { value, isExpanded } = useItemContext();
+
+  return (
+    <button
+      type="button"
+      aria-expanded={isExpanded}
+      onClick={() => toggleItem(value)}
+      data-accordion-trigger=""
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Accordion.Itemの折りたたみ可能なコンテンツ領域。
+ *
+ * @example
+ * <Accordion.Panel>展開時に表示されるコンテンツ</Accordion.Panel>
+ */
+function Panel({ children }: { children: React.ReactNode }) {
+  const { isExpanded } = useItemContext();
+
+  if (!isExpanded) return null;
+
+  return (
+    <div role="region" data-accordion-panel="">
+      {children}
+    </div>
+  );
+}
+```
+
+### ステップ5 — 名前空間としてエクスポート
+
+Base UIは `Accordion.Root` / `Accordion.Trigger` パターンを使用します。これはオブジェクトをエクスポートすることで実現されます。
+
+```tsx
+export const Accordion = {
+  Root,
+  Item,
+  Trigger,
+  Panel,
+};
+```
+
+これにより、利用者は以下のように記述します：
+
+```tsx
+<Accordion.Root defaultValue={["faq-1"]} multiple>
+  <Accordion.Item value="faq-1">
+    <Accordion.Trigger>Base UIとは？</Accordion.Trigger>
+    <Accordion.Panel>
+      Base UIはスタイルなしのアクセシブルなコンポーネントライブラリです。
+    </Accordion.Panel>
+  </Accordion.Item>
+  <Accordion.Item value="faq-2">
+    <Accordion.Trigger>無料ですか？</Accordion.Trigger>
+    <Accordion.Panel>はい、MITライセンスです。</Accordion.Panel>
+  </Accordion.Item>
+</Accordion.Root>
+```
+
+## このパターンが重要な理由
+
+| メリット | 説明 |
+|---------|------|
+| **制御の反転** | マークアップとレイアウトはライブラリではなく利用者が決める |
+| **暗黙的な状態共有** | prop drilling不要、render-propチェーン不要 |
+| **コロケーション** | 関連するUIがJSX内でまとまって配置される |
+| **デフォルトでアクセシブル** | `aria-expanded`、`role`、キーボードイベントをライブラリが内部で接続 |
+| **スタイリングの自由** | データ属性（`data-state="open"`）によりJSコールバックなしでCSSのみのスタイリングが可能 |
+
+## よくある間違い
+
+1. **Context値の`useMemo`を忘れる** — メモ化なしでは、レンダリングごとに新しいオブジェクト参照が作成され、何も変わっていなくてもすべてのコンシューマーが再レンダリングされます。
+
+2. **Contextのバリデーションをしない** — `useContext`が`null`を返したときにスローしなければ、有用なメッセージの代わりに不可解な`Cannot read property of null`エラーが発生します。
+
+3. **状態を間違ったレベルに結合する** — Rootは*共有*状態（どのアイテムが展開されているか）を所有すべきです。Itemはアイテムレベルの派生状態（自分は展開されているか？）のみを所有すべきです。これらのレベルを混ぜるとコンポーネントが壊れやすくなります。
+
+## Base UIがこのパターンをどう拡張するか
+
+Base UIの実際の実装は、ここで構築したものの上にいくつかのレイヤーを追加します：
+
+- `value` / `defaultValue` / `onValueChange` propsによる**制御・非制御**モード
+- ポリモーフィックレンダリングのための**`render` prop** — どのサブコンポーネントもカスタム要素としてレンダリング可能
+- スタイリングフックのための**`data-*`属性**（`data-state`、`data-disabled`、`data-orientation`）
+- Root内で管理される**キーボードナビゲーション**（矢印キー、Home、End）
+- 型安全な値制約のための**TypeScriptジェネリクス**（次のレッスンで取り上げます）
+
+この先のモジュールでは、これらのレイヤーをひとつずつ自分で構築していきます。
+
+## 演習
+
+次に進む前に、構築したAccordionを拡張してみましょう：
+
+1. トグルを防止する `disabled` propを `Accordion.Item` に追加する。
+2. TriggerとPanelをスクリーンリーダー向けにリンクする `aria-controls` と `id` 属性を追加する。
+3. キーボードサポートを追加する：Triggerで `Enter` または `Space` を押すとPanelがトグルされるようにする。
+
+これら3つの追加により、ヘッドレスライブラリがすべてのコンポーネントに対して処理するアクセシビリティ作業の感覚をつかむことができます。

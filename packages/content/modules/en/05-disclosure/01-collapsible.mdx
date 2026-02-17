@@ -1,0 +1,247 @@
+---
+title: "Building a Collapsible Component"
+description: "Learn how to build a Collapsible component with aria-expanded, aria-controls, and smooth height animation using the CSS grid trick."
+order: 1
+isFree: false
+---
+
+# Building a Collapsible Component
+
+A **Collapsible** component (also known as a disclosure widget) shows or hides a section of content when the user clicks a trigger. It is the fundamental building block for accordions, expandable sections, and FAQ lists. Getting the accessibility and animation story right here pays dividends in every component that builds on top of it.
+
+## ARIA Attributes for Disclosure
+
+The WAI-ARIA authoring practices define a clear pattern for disclosure widgets:
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `aria-expanded` | Trigger button | Announces whether the content is visible (`true`) or hidden (`false`) |
+| `aria-controls` | Trigger button | References the `id` of the controlled content panel |
+| `id` | Content panel | The target of `aria-controls` |
+
+When a screen reader user encounters the trigger, they hear something like: "Toggle details, button, collapsed." After clicking, it updates to "expanded."
+
+```tsx
+<button aria-expanded={open} aria-controls="panel-1">
+  Toggle Details
+</button>
+<div id="panel-1" role="region">
+  {/* Content */}
+</div>
+```
+
+## Component API Design
+
+Our Collapsible follows the compound component pattern:
+
+- **`Collapsible.Root`** — Manages open/close state and provides context.
+- **`Collapsible.Trigger`** — The button that toggles visibility.
+- **`Collapsible.Content`** — The panel that shows or hides.
+
+```tsx
+interface CollapsibleProps {
+  open?: boolean;          // Controlled mode
+  defaultOpen?: boolean;   // Uncontrolled default
+  onOpenChange?: (open: boolean) => void;
+}
+```
+
+Supporting both controlled and uncontrolled patterns makes the component flexible for different use cases.
+
+## Managing Controlled and Uncontrolled State
+
+We use a custom hook that supports both modes:
+
+```tsx
+function useControllableState<T>(
+  controlledValue: T | undefined,
+  defaultValue: T,
+  onChange?: (value: T) => void,
+): [T, (value: T) => void] {
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+  const isControlled = controlledValue !== undefined;
+  const value = isControlled ? controlledValue : internalValue;
+
+  const setValue = React.useCallback(
+    (next: T) => {
+      if (!isControlled) setInternalValue(next);
+      onChange?.(next);
+    },
+    [isControlled, onChange],
+  );
+
+  return [value, setValue];
+}
+```
+
+## The CSS Grid Animation Trick
+
+Animating height from `0` to `auto` has been a long-standing CSS challenge. The traditional `max-height` approach requires guessing a maximum value and produces unnatural easing. The **CSS grid trick** solves this elegantly:
+
+```css
+.collapsible-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms ease;
+}
+
+.collapsible-content[data-state="open"] {
+  grid-template-rows: 1fr;
+}
+
+.collapsible-content > div {
+  overflow: hidden;
+}
+```
+
+Here is how it works:
+
+1. The content panel is a CSS grid container.
+2. `grid-template-rows: 0fr` collapses the row to zero height.
+3. `grid-template-rows: 1fr` expands the row to fit its content (equivalent to `auto`).
+4. CSS transitions animate between `0fr` and `1fr` smoothly.
+5. The inner `<div>` uses `overflow: hidden` to clip the content during transition.
+
+This approach requires **no JavaScript measurement** of content height. The browser calculates the intrinsic height automatically, and the transition handles the rest.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+interface CollapsibleContextValue {
+  open: boolean;
+  toggle: () => void;
+  contentId: string;
+}
+
+const CollapsibleContext = React.createContext<CollapsibleContextValue | null>(null);
+
+function useCollapsibleContext() {
+  const ctx = React.useContext(CollapsibleContext);
+  if (!ctx) throw new Error("Collapsible sub-components must be used within Collapsible.Root");
+  return ctx;
+}
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+  ...props
+}: CollapsibleProps & React.ComponentPropsWithoutRef<"div">) {
+  const [open, setOpen] = useControllableState(controlledOpen, defaultOpen, onOpenChange);
+  const contentId = React.useId();
+  const toggle = React.useCallback(() => setOpen(!open), [open, setOpen]);
+
+  const ctx = React.useMemo(
+    () => ({ open, toggle, contentId }),
+    [open, toggle, contentId],
+  );
+
+  return (
+    <CollapsibleContext value={ctx}>
+      <div data-state={open ? "open" : "closed"} {...props}>
+        {children}
+      </div>
+    </CollapsibleContext>
+  );
+}
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { open, toggle, contentId } = useCollapsibleContext();
+
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={contentId}
+      data-state={open ? "open" : "closed"}
+      onClick={toggle}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, contentId } = useCollapsibleContext();
+
+  return (
+    <div
+      id={contentId}
+      role="region"
+      data-state={open ? "open" : "closed"}
+      hidden={!open}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export const Collapsible = { Root, Trigger, Content };
+```
+
+## Animating with the Grid Trick
+
+To use the CSS grid animation, the Content component needs a slight modification. Instead of using the `hidden` attribute (which does not animate), we keep the element in the DOM and control visibility with CSS:
+
+```tsx
+function AnimatedContent({
+  children,
+  forceMount = false,
+  ...props
+}: { forceMount?: boolean } & React.ComponentPropsWithoutRef<"div">) {
+  const { open, contentId } = useCollapsibleContext();
+
+  return (
+    <div
+      id={contentId}
+      role="region"
+      data-state={open ? "open" : "closed"}
+      style={{
+        display: "grid",
+        gridTemplateRows: open ? "1fr" : "0fr",
+        transition: "grid-template-rows 300ms ease",
+      }}
+      {...props}
+    >
+      <div style={{ overflow: "hidden" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+## Keyboard Interaction
+
+The trigger is a `<button>`, so keyboard interaction comes for free:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Toggles the collapsible |
+| `Space` | Toggles the collapsible |
+
+No additional keyboard handling is needed because we use a native `<button>` element.
+
+## Key Takeaways
+
+1. **`aria-expanded`** on the trigger announces the current state to screen readers.
+2. **`aria-controls`** links the trigger to the content panel by ID.
+3. **`useControllableState`** supports both controlled and uncontrolled usage patterns.
+4. **The CSS grid trick** (`grid-template-rows: 0fr` to `1fr`) animates height to `auto` without JavaScript measurement.
+5. **Data attributes** (`data-state="open"` / `"closed"`) enable pure CSS styling and transitions.
+6. **Native `<button>`** provides keyboard support automatically.
+
+## Try It Yourself
+
+<Exercise id="collapsible-basic" />

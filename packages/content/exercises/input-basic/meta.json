@@ -1,0 +1,25 @@
+{
+  "id": "input-basic",
+  "title": {
+    "en": "Build a Headless Input",
+    "ja": "ヘッドレスInputを構築する"
+  },
+  "difficulty": "beginner",
+  "module": "01-primitives",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Start by spreading all native props onto the <input> element",
+      "Use React.useState to track whether the input is currently focused",
+      "Set data-disabled to `disabled || undefined` so it only appears when truthy",
+      "Mirror aria-invalid into a data-invalid attribute for CSS styling hooks"
+    ],
+    "ja": [
+      "まず全てのネイティブpropsを<input>要素にスプレッドしましょう",
+      "React.useStateを使ってフォーカス状態をトラッキングしましょう",
+      "data-disabledは `disabled || undefined` として、truthyの時のみ表示されるようにしましょう",
+      "aria-invalidをdata-invalid属性にミラーリングして、CSSスタイリングフックを提供しましょう"
+    ]
+  },
+  "dependencies": {}
+}

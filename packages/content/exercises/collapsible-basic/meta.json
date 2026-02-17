@@ -1,0 +1,27 @@
+{
+  "id": "collapsible-basic",
+  "title": {
+    "en": "Build a Collapsible Component",
+    "ja": "Collapsibleコンポーネントを構築する"
+  },
+  "difficulty": "beginner",
+  "module": "05-disclosure",
+  "order": 1,
+  "hints": {
+    "en": [
+      "Use React.useState to track the open/closed state",
+      "Use React.useId() to generate a unique ID for the content panel",
+      "Set aria-expanded on the trigger button and aria-controls pointing to the content id",
+      "Use the hidden attribute on the content div when closed",
+      "Add data-state='open' or 'closed' to all sub-components for CSS styling"
+    ],
+    "ja": [
+      "React.useStateで開閉状態を管理しましょう",
+      "React.useId()でコンテンツパネルのユニークIDを生成します",
+      "トリガーボタンにaria-expandedを、aria-controlsでコンテンツIDを参照します",
+      "閉じている時はコンテンツdivにhidden属性を使います",
+      "CSSスタイリングのためにすべてのサブコンポーネントにdata-state='open'または'closed'を追加します"
+    ]
+  },
+  "dependencies": {}
+}

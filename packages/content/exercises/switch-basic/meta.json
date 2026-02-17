@@ -1,0 +1,27 @@
+{
+  "id": "switch-basic",
+  "title": {
+    "en": "Build a Headless Switch",
+    "ja": "ヘッドレスSwitchを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "02-toggle-state",
+  "order": 2,
+  "hints": {
+    "en": [
+      "Use role='switch' on the button element",
+      "Set aria-checked to the current boolean state",
+      "Handle both click and keyboard events (Space and Enter)",
+      "Guard all state changes with a `if (!disabled)` check",
+      "Use `controlledChecked !== undefined` to detect controlled mode"
+    ],
+    "ja": [
+      "button要素にrole='switch'を設定しましょう",
+      "aria-checkedに現在のboolean状態を設定しましょう",
+      "clickとキーボードイベント（SpaceとEnter）の両方を処理しましょう",
+      "全ての状態変更を `if (!disabled)` でガードしましょう",
+      "`controlledChecked !== undefined` でコントロールドモードを検出しましょう"
+    ]
+  },
+  "dependencies": {}
+}

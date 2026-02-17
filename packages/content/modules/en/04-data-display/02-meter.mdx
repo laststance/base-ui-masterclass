@@ -1,0 +1,215 @@
+---
+title: "Building a Meter Component"
+description: "Learn how to build a Meter component for displaying scalar measurements within known ranges, with low/high/optimum semantic zones."
+order: 2
+isFree: false
+---
+
+# Building a Meter Component
+
+A **Meter** component represents a scalar measurement within a known range. Think of it as a fuel gauge, battery indicator, or disk usage bar. While it may look similar to a Progress component, Meter serves a fundamentally different purpose and uses different ARIA semantics.
+
+## Meter vs. Progress: What is the Difference?
+
+This distinction trips up many developers. Here is how to decide which to use:
+
+| Characteristic | Progress | Meter |
+|---------------|----------|-------|
+| Represents | Task completion over time | A scalar value at a point in time |
+| Direction | Moves toward completion | Can go up or down |
+| Example | File upload (0% to 100%) | CPU usage (currently 73%) |
+| ARIA role | `progressbar` | `meter` |
+| Indeterminate state | Yes (unknown completion) | No (always has a value) |
+
+The key question is: **Does the value represent progress toward a goal, or a measurement?** A download percentage is progress. A temperature reading is a meter.
+
+## The Native `<meter>` Element
+
+HTML provides a `<meter>` element with built-in semantics for low, high, and optimum values. Like `<progress>`, it suffers from inconsistent cross-browser styling. The headless approach gives us full visual control while maintaining accessibility.
+
+```html
+<meter value="0.6" min="0" max="1" low="0.25" high="0.75" optimum="0.5">
+  60%
+</meter>
+```
+
+## ARIA Attributes for Meter
+
+The `meter` role is supported in ARIA with the following attributes:
+
+| Attribute | Purpose | Default |
+|-----------|---------|---------|
+| `role="meter"` | Identifies the element as a meter | Required |
+| `aria-valuenow` | Current value (always required for meter) | — |
+| `aria-valuemin` | Minimum value | `0` |
+| `aria-valuemax` | Maximum value | `100` |
+| `aria-valuetext` | Human-readable description of the value | Optional |
+| `aria-label` | Accessible label | Recommended |
+
+Unlike `progressbar`, the `meter` role always requires `aria-valuenow` because a meter without a value is meaningless.
+
+## Low, High, and Optimum Ranges
+
+What makes Meter special is its ability to communicate **quality zones**. The `low`, `high`, and `optimum` properties divide the range into semantic segments:
+
+```
+min ─────── low ─────── high ─────── max
+  [  sub-optimal  ] [  normal  ] [ sub-optimal ]
+```
+
+The `optimum` value indicates where the ideal value lies. The browser (or in our case, the component logic) uses these thresholds to determine whether the current value is "good," "average," or "poor":
+
+- If `optimum` is within `[low, high]`: values in that range are "good," outside is "poor."
+- If `optimum < low`: lower values are better (e.g., response time).
+- If `optimum > high`: higher values are better (e.g., battery level).
+
+## Calculating the Status
+
+We derive a `data-status` attribute that consumers can use for styling:
+
+```tsx
+function getStatus(
+  value: number,
+  min: number,
+  max: number,
+  low: number,
+  high: number,
+  optimum: number,
+): "good" | "average" | "poor" {
+  // Determine which zone optimum falls in
+  const optimumIsLow = optimum < low;
+  const optimumIsHigh = optimum > high;
+
+  if (value >= low && value <= high) {
+    // Value is in the middle zone
+    return optimumIsLow || optimumIsHigh ? "average" : "good";
+  }
+
+  if (value < low) {
+    return optimumIsLow ? "good" : "poor";
+  }
+
+  // value > high
+  return optimumIsHigh ? "good" : "poor";
+}
+```
+
+## Component API Design
+
+```tsx
+interface MeterProps {
+  value: number;
+  min?: number;      // default: 0
+  max?: number;      // default: 100
+  low?: number;      // default: min
+  high?: number;     // default: max
+  optimum?: number;  // default: midpoint of [min, max]
+}
+```
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+interface MeterContextValue {
+  value: number;
+  min: number;
+  max: number;
+  low: number;
+  high: number;
+  optimum: number;
+  percentage: number;
+  status: "good" | "average" | "poor";
+}
+
+const MeterContext = React.createContext<MeterContextValue | null>(null);
+
+function useMeterContext() {
+  const ctx = React.useContext(MeterContext);
+  if (!ctx) throw new Error("Meter sub-components must be used within Meter.Root");
+  return ctx;
+}
+
+function Root({
+  value,
+  min = 0,
+  max = 100,
+  low = min,
+  high = max,
+  optimum = (min + max) / 2,
+  children,
+  ...props
+}: MeterProps & React.ComponentPropsWithoutRef<"div">) {
+  const percentage = Math.round(((value - min) / (max - min)) * 100);
+  const status = getStatus(value, min, max, low, high, optimum);
+
+  const ctx = React.useMemo(
+    () => ({ value, min, max, low, high, optimum, percentage, status }),
+    [value, min, max, low, high, optimum, percentage, status],
+  );
+
+  return (
+    <MeterContext value={ctx}>
+      <div
+        role="meter"
+        aria-valuenow={value}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        data-status={status}
+        style={{ "--meter-value": `${percentage}%` } as React.CSSProperties}
+        {...props}
+      >
+        {children}
+      </div>
+    </MeterContext>
+  );
+}
+
+function Indicator(props: React.ComponentPropsWithoutRef<"div">) {
+  const { percentage, status } = useMeterContext();
+
+  return (
+    <div
+      data-status={status}
+      style={{ width: `${percentage}%` }}
+      {...props}
+    />
+  );
+}
+
+export const Meter = { Root, Indicator };
+```
+
+## Styling with Data Attributes
+
+Consumers can apply semantic colors based on the `data-status` attribute:
+
+```css
+[data-status="good"] .meter-indicator {
+  background-color: var(--color-success);
+}
+
+[data-status="average"] .meter-indicator {
+  background-color: var(--color-warning);
+}
+
+[data-status="poor"] .meter-indicator {
+  background-color: var(--color-error);
+}
+```
+
+## Real-World Use Cases
+
+- **Battery indicator**: `optimum={100}`, `low={20}`, `high={80}` — low battery is "poor."
+- **Server response time**: `optimum={0}`, `low={200}`, `high={500}`, `max={1000}` — lower is better.
+- **Disk usage**: `optimum={0}`, `low={60}`, `high={85}`, `max={100}` — less usage is better.
+- **Sound level**: `optimum={50}`, `low={20}`, `high={80}` — middle range is ideal.
+
+## Key Takeaways
+
+1. **Meter is not Progress** — use Meter for measurements, Progress for task completion.
+2. **`aria-valuenow` is always required** for meters, unlike progress which can be indeterminate.
+3. **Low, high, and optimum** create semantic zones that convey quality, not just quantity.
+4. **`data-status`** enables CSS-only styling for good/average/poor states.
+5. **CSS custom properties** like `--meter-value` decouple layout from component logic.

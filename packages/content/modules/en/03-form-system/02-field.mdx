@@ -1,0 +1,350 @@
+---
+title: "Building a Field Component"
+description: "Build a Field component that composes label, input, description, and error message into a single accessible unit using useId for ARIA associations."
+order: 2
+isFree: false
+---
+
+# Building a Field Component
+
+A form field is not just an input. It is a **composition** of four elements that must be connected via ARIA:
+
+1. **Label** -- Describes the field (`<label>`)
+2. **Control** -- The input element (`<input>`, `<select>`, `<textarea>`)
+3. **Description** -- Help text (`aria-describedby`)
+4. **Error** -- Validation error message (`aria-errormessage` or `aria-describedby`)
+
+Without proper associations, screen readers cannot connect these elements. A sighted user sees the layout and understands that "Email" labels the text input below it. A screen reader user needs ARIA attributes to make the same connection.
+
+## The Association Problem
+
+Consider this common pattern:
+
+```tsx
+{/* Broken: screen readers don't know these are related */}
+<span>Email</span>
+<input type="email" />
+<span>We'll never share your email</span>
+<span>Invalid email address</span>
+```
+
+The fix requires IDs and ARIA attributes:
+
+```tsx
+<label htmlFor="email-input">Email</label>
+<input
+  id="email-input"
+  type="email"
+  aria-describedby="email-desc email-error"
+  aria-invalid={hasError}
+/>
+<span id="email-desc">We'll never share your email</span>
+<span id="email-error" role="alert">Invalid email address</span>
+```
+
+Manually managing IDs is tedious and error-prone. The Field component automates it.
+
+## Step 1: Generate Stable IDs with useId
+
+React 18+ provides `useId()` for generating stable, SSR-safe unique IDs:
+
+```tsx
+import * as React from "react";
+
+function useFieldIds() {
+  const id = React.useId();
+  return {
+    controlId: `${id}-control`,
+    labelId: `${id}-label`,
+    descriptionId: `${id}-description`,
+    errorId: `${id}-error`,
+  };
+}
+```
+
+## Step 2: Define the Field Context
+
+The Field parent shares IDs and state with its children through context:
+
+```tsx
+interface FieldContextValue {
+  controlId: string;
+  labelId: string;
+  descriptionId: string;
+  errorId: string;
+  invalid: boolean;
+  disabled: boolean;
+  hasDescription: boolean;
+  hasError: boolean;
+  setHasDescription: (value: boolean) => void;
+  setHasError: (value: boolean) => void;
+  setInvalid: (value: boolean) => void;
+}
+
+const FieldContext = React.createContext<FieldContextValue | null>(null);
+
+function useFieldContext() {
+  const ctx = React.useContext(FieldContext);
+  if (!ctx) {
+    throw new Error("Field.* components must be used within a Field.Root");
+  }
+  return ctx;
+}
+```
+
+## Step 3: Build Field.Root
+
+```tsx
+interface FieldRootProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** Whether the field is invalid */
+  invalid?: boolean;
+  /** Whether the field is disabled */
+  disabled?: boolean;
+  ref?: React.Ref<HTMLDivElement>;
+}
+
+function FieldRoot({
+  invalid: controlledInvalid = false,
+  disabled = false,
+  children,
+  ref,
+  ...props
+}: FieldRootProps) {
+  const ids = useFieldIds();
+  const [hasDescription, setHasDescription] = React.useState(false);
+  const [hasError, setHasError] = React.useState(false);
+  const [invalid, setInvalid] = React.useState(controlledInvalid);
+
+  // Sync controlled invalid prop
+  React.useEffect(() => {
+    setInvalid(controlledInvalid);
+  }, [controlledInvalid]);
+
+  const contextValue = React.useMemo<FieldContextValue>(
+    () => ({
+      ...ids,
+      invalid,
+      disabled,
+      hasDescription,
+      hasError,
+      setHasDescription,
+      setHasError,
+      setInvalid,
+    }),
+    [ids, invalid, disabled, hasDescription, hasError],
+  );
+
+  return (
+    <FieldContext value={contextValue}>
+      <div
+        ref={ref}
+        {...props}
+        data-invalid={invalid || undefined}
+        data-disabled={disabled || undefined}
+      >
+        {children}
+      </div>
+    </FieldContext>
+  );
+}
+```
+
+## Step 4: Build Field.Label
+
+```tsx
+interface FieldLabelProps extends React.ComponentPropsWithoutRef<"label"> {
+  ref?: React.Ref<HTMLLabelElement>;
+}
+
+function FieldLabel({ ref, ...props }: FieldLabelProps) {
+  const { controlId, labelId } = useFieldContext();
+
+  return (
+    <label
+      ref={ref}
+      id={labelId}
+      htmlFor={controlId}
+      {...props}
+    />
+  );
+}
+```
+
+## Step 5: Build Field.Control
+
+The control wraps the input and connects it to label, description, and error:
+
+```tsx
+interface FieldControlProps extends React.ComponentPropsWithoutRef<"input"> {
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLInputElement>;
+}
+
+function FieldControl({ render, ref, onInvalid, ...props }: FieldControlProps) {
+  const {
+    controlId,
+    descriptionId,
+    errorId,
+    invalid,
+    disabled,
+    hasDescription,
+    hasError,
+    setInvalid,
+  } = useFieldContext();
+
+  // Build aria-describedby from available descriptions
+  const describedBy = [
+    hasDescription ? descriptionId : null,
+    hasError && invalid ? errorId : null,
+  ]
+    .filter(Boolean)
+    .join(" ") || undefined;
+
+  const handleInvalid = (e: React.FormEvent<HTMLInputElement>) => {
+    setInvalid(true);
+    onInvalid?.(e);
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    id: controlId,
+    disabled,
+    "aria-invalid": invalid || undefined,
+    "aria-describedby": describedBy,
+    onInvalid: handleInvalid,
+    "data-invalid": invalid || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <input {...elementProps} />;
+}
+```
+
+## Step 6: Build Field.Description
+
+```tsx
+interface FieldDescriptionProps extends React.ComponentPropsWithoutRef<"span"> {
+  ref?: React.Ref<HTMLSpanElement>;
+}
+
+function FieldDescription({ ref, ...props }: FieldDescriptionProps) {
+  const { descriptionId, setHasDescription } = useFieldContext();
+
+  React.useEffect(() => {
+    setHasDescription(true);
+    return () => setHasDescription(false);
+  }, [setHasDescription]);
+
+  return <span ref={ref} id={descriptionId} {...props} />;
+}
+```
+
+## Step 7: Build Field.Error
+
+The error only renders content when the field is invalid:
+
+```tsx
+interface FieldErrorProps extends React.ComponentPropsWithoutRef<"span"> {
+  /** Force display even when field is valid */
+  forceShow?: boolean;
+  ref?: React.Ref<HTMLSpanElement>;
+}
+
+function FieldError({
+  forceShow = false,
+  children,
+  ref,
+  ...props
+}: FieldErrorProps) {
+  const { errorId, invalid, setHasError } = useFieldContext();
+
+  const shouldShow = forceShow || invalid;
+
+  React.useEffect(() => {
+    setHasError(true);
+    return () => setHasError(false);
+  }, [setHasError]);
+
+  if (!shouldShow) {
+    return null;
+  }
+
+  return (
+    <span
+      ref={ref}
+      id={errorId}
+      role="alert"
+      {...props}
+    >
+      {children}
+    </span>
+  );
+}
+```
+
+## Step 8: Export as a Namespace
+
+```tsx
+export const Field = {
+  Root: FieldRoot,
+  Label: FieldLabel,
+  Control: FieldControl,
+  Description: FieldDescription,
+  Error: FieldError,
+};
+```
+
+## Usage
+
+```tsx
+<Field.Root invalid={!!errors.email}>
+  <Field.Label>Email address</Field.Label>
+  <Field.Control
+    type="email"
+    required
+    placeholder="you@example.com"
+  />
+  <Field.Description>
+    We will never share your email with anyone.
+  </Field.Description>
+  <Field.Error>
+    {errors.email}
+  </Field.Error>
+</Field.Root>
+```
+
+The rendered HTML will have all IDs and ARIA attributes automatically connected:
+
+```html
+<div data-invalid>
+  <label id=":r1:-label" for=":r1:-control">Email address</label>
+  <input
+    id=":r1:-control"
+    type="email"
+    required
+    aria-invalid
+    aria-describedby=":r1:-description :r1:-error"
+    data-invalid
+  />
+  <span id=":r1:-description">We will never share your email with anyone.</span>
+  <span id=":r1:-error" role="alert">Invalid email address</span>
+</div>
+```
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| `useId()` | Generate SSR-safe unique IDs for ARIA associations |
+| Compound components | Label, Control, Description, Error all share context |
+| `aria-describedby` | Connect help text and errors to the input |
+| `aria-invalid` | Communicate validation state to screen readers |
+| `role="alert"` | Announce errors to screen readers immediately |
+| Registration pattern | Children register themselves (setHasDescription) so parent knows what exists |
+
+The Field is the most important form primitive. Every form input -- email, password, select, textarea -- will be wrapped in a Field. Next, we build the Form component that collects all fields and manages submission.

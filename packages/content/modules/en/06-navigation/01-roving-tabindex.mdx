@@ -1,0 +1,258 @@
+---
+title: "The Roving Tabindex Pattern"
+description: "Master the WAI-ARIA roving tabindex pattern for arrow key navigation, wrapping, and Home/End key support — the foundation for Tabs and Toolbar."
+order: 1
+isFree: false
+---
+
+# The Roving Tabindex Pattern
+
+The **roving tabindex** pattern is one of the most important keyboard navigation patterns in web accessibility. It allows a group of related elements (like tabs, toolbar buttons, or menu items) to behave as a single tab stop, with arrow keys moving focus between items within the group. This lesson teaches the pattern from scratch, as it forms the foundation for Tabs, Toolbar, Menu, and many other composite widgets.
+
+## The Problem: Too Many Tab Stops
+
+Consider a toolbar with 10 buttons. Without roving tabindex, a keyboard user must press Tab 10 times to get past the toolbar. This is tedious and violates the WAI-ARIA design pattern for composite widgets.
+
+```
+[Tab] → Button 1 → [Tab] → Button 2 → [Tab] → ... → Button 10 → [Tab] → Next section
+                    (9 extra Tab presses!)
+```
+
+The roving tabindex pattern reduces this to a single Tab stop:
+
+```
+[Tab] → Button 1 (or last focused button)
+  [ArrowRight] → Button 2
+  [ArrowRight] → Button 3
+[Tab] → Next section
+```
+
+## How Roving Tabindex Works
+
+The technique manipulates the `tabindex` attribute across the group:
+
+1. **One item** has `tabindex="0"` — this is the active (focusable) item.
+2. **All other items** have `tabindex="-1"` — they are programmatically focusable but not in the tab order.
+3. When the user presses an **arrow key**, we move `tabindex="0"` to the next item and call `element.focus()`.
+
+```tsx
+// Before: Button 2 is active
+<button tabindex="-1">Button 1</button>
+<button tabindex="0">Button 2</button>  // ← In tab order
+<button tabindex="-1">Button 3</button>
+
+// After pressing ArrowRight: Button 3 is active
+<button tabindex="-1">Button 1</button>
+<button tabindex="-1">Button 2</button>
+<button tabindex="0">Button 3</button>  // ← Moved here
+```
+
+## Arrow Key Navigation
+
+The arrow keys used depend on the widget's orientation:
+
+| Orientation | Forward | Backward |
+|------------|---------|----------|
+| Horizontal | `ArrowRight` | `ArrowLeft` |
+| Vertical | `ArrowDown` | `ArrowUp` |
+| Both | All four arrows work | All four arrows work |
+
+## Wrapping Behavior
+
+When the user reaches the last item and presses the forward arrow key, focus should wrap to the first item. Similarly, pressing backward on the first item wraps to the last:
+
+```
+Button 1 ← [ArrowLeft] ← Button 2 ← [ArrowLeft] ← Button 3
+   ↑                                                    ↓
+   └──────────── [ArrowLeft wraps] ─────────────────────┘
+```
+
+## Home and End Keys
+
+| Key | Action |
+|-----|--------|
+| `Home` | Move focus to the first item |
+| `End` | Move focus to the last item |
+
+These are required by the WAI-ARIA specification for composite widgets.
+
+## Building the useRovingTabIndex Hook
+
+Let us implement this pattern as a reusable hook:
+
+```tsx
+import * as React from "react";
+
+interface UseRovingTabIndexOptions {
+  orientation?: "horizontal" | "vertical" | "both";
+  wrap?: boolean;
+  initialIndex?: number;
+}
+
+interface UseRovingTabIndexReturn {
+  activeIndex: number;
+  getItemProps: (index: number) => {
+    tabIndex: number;
+    onKeyDown: (e: React.KeyboardEvent) => void;
+    onFocus: () => void;
+    ref: (el: HTMLElement | null) => void;
+  };
+}
+
+function useRovingTabIndex({
+  orientation = "horizontal",
+  wrap = true,
+  initialIndex = 0,
+}: UseRovingTabIndexOptions = {}): UseRovingTabIndexReturn {
+  const [activeIndex, setActiveIndex] = React.useState(initialIndex);
+  const itemsRef = React.useRef<(HTMLElement | null)[]>([]);
+
+  const getNextIndex = React.useCallback(
+    (current: number, direction: 1 | -1) => {
+      const count = itemsRef.current.length;
+      if (count === 0) return current;
+
+      let next = current + direction;
+
+      if (wrap) {
+        next = ((next % count) + count) % count;
+      } else {
+        next = Math.max(0, Math.min(next, count - 1));
+      }
+
+      return next;
+    },
+    [wrap],
+  );
+
+  const moveFocus = React.useCallback(
+    (nextIndex: number) => {
+      setActiveIndex(nextIndex);
+      itemsRef.current[nextIndex]?.focus();
+    },
+    [],
+  );
+
+  const handleKeyDown = React.useCallback(
+    (event: React.KeyboardEvent) => {
+      const forwardKeys =
+        orientation === "vertical"
+          ? ["ArrowDown"]
+          : orientation === "horizontal"
+            ? ["ArrowRight"]
+            : ["ArrowRight", "ArrowDown"];
+
+      const backwardKeys =
+        orientation === "vertical"
+          ? ["ArrowUp"]
+          : orientation === "horizontal"
+            ? ["ArrowLeft"]
+            : ["ArrowLeft", "ArrowUp"];
+
+      if (forwardKeys.includes(event.key)) {
+        event.preventDefault();
+        moveFocus(getNextIndex(activeIndex, 1));
+      } else if (backwardKeys.includes(event.key)) {
+        event.preventDefault();
+        moveFocus(getNextIndex(activeIndex, -1));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        moveFocus(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        moveFocus(itemsRef.current.length - 1);
+      }
+    },
+    [orientation, activeIndex, getNextIndex, moveFocus],
+  );
+
+  const getItemProps = React.useCallback(
+    (index: number) => ({
+      tabIndex: index === activeIndex ? 0 : -1,
+      onKeyDown: handleKeyDown,
+      onFocus: () => setActiveIndex(index),
+      ref: (el: HTMLElement | null) => {
+        itemsRef.current[index] = el;
+      },
+    }),
+    [activeIndex, handleKeyDown],
+  );
+
+  return { activeIndex, getItemProps };
+}
+```
+
+## Usage Example
+
+```tsx
+function Toolbar() {
+  const { getItemProps } = useRovingTabIndex({
+    orientation: "horizontal",
+  });
+
+  return (
+    <div role="toolbar" aria-label="Text formatting">
+      <button {...getItemProps(0)}>Bold</button>
+      <button {...getItemProps(1)}>Italic</button>
+      <button {...getItemProps(2)}>Underline</button>
+    </div>
+  );
+}
+```
+
+Only the active button is in the tab order. Arrow keys move focus between buttons. Tab exits the toolbar entirely.
+
+## Skipping Disabled Items
+
+In a real-world implementation, disabled items should be skipped during arrow key navigation:
+
+```tsx
+const getNextIndex = (current: number, direction: 1 | -1) => {
+  const count = itemsRef.current.length;
+  let next = current;
+  let attempts = 0;
+
+  do {
+    next = next + direction;
+    if (wrap) {
+      next = ((next % count) + count) % count;
+    } else {
+      next = Math.max(0, Math.min(next, count - 1));
+    }
+    attempts++;
+  } while (
+    itemsRef.current[next]?.hasAttribute("disabled") &&
+    attempts < count
+  );
+
+  return next;
+};
+```
+
+## Context-Based Approach
+
+For compound components like Tabs and Toolbar, you often manage roving tabindex through context rather than a hook, so child components can register themselves:
+
+```tsx
+const RovingContext = React.createContext<{
+  activeIndex: number;
+  register: (index: number, element: HTMLElement) => void;
+  onKeyDown: (event: React.KeyboardEvent) => void;
+} | null>(null);
+```
+
+We will use this context-based approach when building Tabs and Toolbar in the next lessons.
+
+## Key Takeaways
+
+1. **Roving tabindex** makes a group of elements behave as a single Tab stop.
+2. **One item gets `tabindex="0"`**, all others get `tabindex="-1"`.
+3. **Arrow keys** move focus; which arrows depends on orientation.
+4. **Wrapping** sends focus from last to first (and vice versa).
+5. **Home/End** jump to the first/last item respectively.
+6. **Disabled items should be skipped** during keyboard navigation.
+7. This pattern is required by WAI-ARIA for **tabs, toolbars, menus, tree views**, and other composite widgets.
+
+## Try It Yourself
+
+<Exercise id="roving-tabindex" />

@@ -1,0 +1,328 @@
+---
+title: "Building a Form Component"
+description: "Build a headless Form component that handles submission, error collection, and integrates with the HTML Constraint Validation API."
+order: 3
+isFree: false
+---
+
+# Building a Form Component
+
+The Form component ties everything together. It wraps a native `<form>` element, intercepts submission to run validation, collects errors from all fields, and gives the consumer full control over the error display and submission flow.
+
+## What the Form Component Does
+
+| Responsibility | How |
+|---------------|-----|
+| Prevent default submission | `e.preventDefault()` when custom handling is provided |
+| Run constraint validation | Call `checkValidity()` on all form controls |
+| Collect error messages | Read `validationMessage` from invalid elements |
+| Report errors | Pass error map to consumer |
+| Support async validation | Await the consumer's `onSubmit` handler |
+| Reset state | Clear errors on successful submission or reset |
+
+## Step 1: Define the Error Map
+
+```tsx
+/**
+ * Maps field names to their validation error messages.
+ *
+ * @example
+ * {
+ *   email: "Please enter a valid email address",
+ *   password: "Password must be at least 8 characters"
+ * }
+ */
+type FormErrors = Record<string, string>;
+```
+
+## Step 2: Define the Props
+
+```tsx
+import * as React from "react";
+
+interface FormProps extends Omit<React.ComponentPropsWithoutRef<"form">, "onSubmit" | "onError"> {
+  /**
+   * Called when the form is submitted and all fields are valid.
+   * Receives the FormData object.
+   * Can be async -- the Form will track the pending state.
+   */
+  onSubmit?: (data: FormData) => void | Promise<void>;
+  /**
+   * Called when validation fails.
+   * Receives a map of field names to error messages.
+   */
+  onError?: (errors: FormErrors) => void;
+  /**
+   * Server-side errors to merge with client-side validation.
+   */
+  errors?: FormErrors;
+  ref?: React.Ref<HTMLFormElement>;
+}
+```
+
+## Step 3: Implement the Form
+
+```tsx
+export function Form({
+  onSubmit,
+  onError,
+  errors: serverErrors,
+  children,
+  ref,
+  ...props
+}: FormProps) {
+  const [errors, setErrors] = React.useState<FormErrors>({});
+  const [isPending, setIsPending] = React.useState(false);
+
+  // Merge client and server errors
+  const mergedErrors = React.useMemo(
+    () => ({ ...errors, ...serverErrors }),
+    [errors, serverErrors],
+  );
+
+  const collectErrors = (form: HTMLFormElement): FormErrors => {
+    const errorMap: FormErrors = {};
+    const elements = form.elements;
+
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLInputElement;
+
+      // Only check named elements with validation
+      if (element.name && !element.validity.valid) {
+        errorMap[element.name] = element.validationMessage;
+      }
+    }
+
+    return errorMap;
+  };
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+
+    // Run browser constraint validation
+    const isValid = form.checkValidity();
+
+    if (!isValid) {
+      const collectedErrors = collectErrors(form);
+      setErrors(collectedErrors);
+      onError?.(collectedErrors);
+      return;
+    }
+
+    // Clear previous errors
+    setErrors({});
+
+    if (onSubmit) {
+      const formData = new FormData(form);
+
+      try {
+        setIsPending(true);
+        await onSubmit(formData);
+      } catch (error) {
+        // If onSubmit throws, treat it as a server error
+        if (error instanceof Error) {
+          setErrors({ form: error.message });
+          onError?.({ form: error.message });
+        }
+      } finally {
+        setIsPending(false);
+      }
+    }
+  };
+
+  const handleReset = () => {
+    setErrors({});
+  };
+
+  // Provide form state to children via context
+  const contextValue = React.useMemo(
+    () => ({ errors: mergedErrors, isPending }),
+    [mergedErrors, isPending],
+  );
+
+  return (
+    <FormContext value={contextValue}>
+      <form
+        ref={ref}
+        {...props}
+        noValidate
+        onSubmit={handleSubmit}
+        onReset={handleReset}
+        data-pending={isPending || undefined}
+      >
+        {children}
+      </form>
+    </FormContext>
+  );
+}
+```
+
+### Key decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `noValidate` | Prevents browser-native error tooltips; we handle error display ourselves |
+| `e.preventDefault()` | Always prevent native submission; we control the flow |
+| `FormData` | Standard API; works with Server Actions in Next.js |
+| Async `onSubmit` | Real-world forms need to await API calls |
+| `data-pending` | CSS can show loading states without JavaScript class toggling |
+
+## Step 4: Form Context
+
+```tsx
+interface FormContextValue {
+  errors: FormErrors;
+  isPending: boolean;
+}
+
+const FormContext = React.createContext<FormContextValue>({
+  errors: {},
+  isPending: false,
+});
+
+/**
+ * Access form-level errors and pending state from any child component.
+ *
+ * @returns Form context with errors map and pending boolean
+ *
+ * @example
+ * function SubmitButton() {
+ *   const { isPending } = useFormContext();
+ *   return <button disabled={isPending}>Submit</button>;
+ * }
+ */
+export function useFormContext() {
+  return React.useContext(FormContext);
+}
+```
+
+## Step 5: FormError Component
+
+A companion component that displays form-level errors:
+
+```tsx
+interface FormErrorProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** The field name to show errors for, or omit for form-level errors */
+  name?: string;
+  ref?: React.Ref<HTMLDivElement>;
+}
+
+function FormError({ name = "form", children, ref, ...props }: FormErrorProps) {
+  const { errors } = useFormContext();
+  const error = errors[name];
+
+  if (!error && !children) {
+    return null;
+  }
+
+  return (
+    <div ref={ref} role="alert" {...props}>
+      {children ?? error}
+    </div>
+  );
+}
+```
+
+## Usage
+
+### Basic Form
+
+```tsx
+<Form
+  onSubmit={async (data) => {
+    const email = data.get("email");
+    const password = data.get("password");
+    await login(email, password);
+  }}
+  onError={(errors) => {
+    console.log("Validation failed:", errors);
+  }}
+>
+  <Field.Root>
+    <Field.Label>Email</Field.Label>
+    <Field.Control name="email" type="email" required />
+    <Field.Error />
+  </Field.Root>
+
+  <Field.Root>
+    <Field.Label>Password</Field.Label>
+    <Field.Control name="password" type="password" required minLength={8} />
+    <Field.Error />
+  </Field.Root>
+
+  <SubmitButton />
+</Form>
+```
+
+### Submit Button with Pending State
+
+```tsx
+function SubmitButton() {
+  const { isPending } = useFormContext();
+
+  return (
+    <button type="submit" disabled={isPending}>
+      {isPending ? "Submitting..." : "Submit"}
+    </button>
+  );
+}
+```
+
+### Server-side Errors
+
+```tsx
+function LoginForm() {
+  const [serverErrors, setServerErrors] = React.useState<FormErrors>({});
+
+  return (
+    <Form
+      errors={serverErrors}
+      onSubmit={async (data) => {
+        const result = await loginAction(data);
+        if (result.error) {
+          setServerErrors({ email: result.error });
+        }
+      }}
+    >
+      {/* ... fields ... */}
+    </Form>
+  );
+}
+```
+
+## The Validation Flow
+
+```
+User clicks Submit
+        |
+        v
+  e.preventDefault()
+        |
+        v
+  form.checkValidity()
+        |
+    +---+---+
+    |       |
+  valid   invalid
+    |       |
+    v       v
+  onSubmit  collectErrors()
+  (async)   setErrors()
+    |       onError()
+    v
+  success/error
+```
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| `noValidate` | Take over from browser validation UI |
+| `checkValidity()` | Trigger constraint validation programmatically |
+| Error collection | Iterate form elements, read `validationMessage` |
+| Async submission | Track pending state for loading indicators |
+| Form context | Share errors and pending state with child components |
+| Server error merging | Combine client-side and server-side validation |
+
+The Form module is complete. You now have a full form system: **Field** for individual field composition, **Constraint Validation** for native validation, and **Form** for submission orchestration. These three pieces work together to handle any form scenario without a third-party form library.

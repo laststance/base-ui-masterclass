@@ -1,0 +1,368 @@
+---
+title: "Building a Tabs Component"
+description: "Learn how to build an accessible Tabs component with role='tablist', roving tabindex integration, and lazy vs eager panel rendering strategies."
+order: 2
+isFree: false
+---
+
+# Building a Tabs Component
+
+**Tabs** organize content into multiple panels, only one of which is visible at a time. The user selects a tab to reveal its corresponding panel. Tabs are one of the most commonly used navigation patterns on the web, and getting the ARIA semantics right is critical for screen reader users.
+
+## ARIA Roles for Tabs
+
+The WAI-ARIA specification defines a precise set of roles for tabbed interfaces:
+
+| Element | Role | Purpose |
+|---------|------|---------|
+| Tab container | `tablist` | Groups the tab elements |
+| Each tab | `tab` | A selectable tab within the list |
+| Each content area | `tabpanel` | The content associated with a tab |
+
+These roles create a semantic relationship that screen readers use to announce: "Tab 2 of 4, selected" and "Tab panel."
+
+## ARIA Attributes
+
+| Attribute | Applied To | Purpose |
+|-----------|-----------|---------|
+| `role="tablist"` | Tab container | Identifies the tab group |
+| `role="tab"` | Each tab button | Identifies as a tab |
+| `role="tabpanel"` | Each panel | Identifies as a panel |
+| `aria-selected="true"` | Active tab | Announces which tab is selected |
+| `aria-controls` | Each tab | Points to its panel's `id` |
+| `aria-labelledby` | Each panel | Points to its tab's `id` |
+| `aria-orientation` | Tab container | `"horizontal"` (default) or `"vertical"` |
+
+```tsx
+<div role="tablist" aria-label="Account settings" aria-orientation="horizontal">
+  <button role="tab" id="tab-1" aria-selected="true" aria-controls="panel-1">
+    General
+  </button>
+  <button role="tab" id="tab-2" aria-selected="false" aria-controls="panel-2" tabindex="-1">
+    Security
+  </button>
+</div>
+<div role="tabpanel" id="panel-1" aria-labelledby="tab-1">
+  General settings content...
+</div>
+```
+
+## Keyboard Navigation with Roving Tabindex
+
+Tabs use the roving tabindex pattern from the previous lesson:
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Moves focus into the tablist (to the selected tab) |
+| `ArrowRight` | Moves focus to the next tab (horizontal orientation) |
+| `ArrowLeft` | Moves focus to the previous tab |
+| `ArrowDown` | Moves focus to the next tab (vertical orientation) |
+| `ArrowUp` | Moves focus to the previous tab (vertical orientation) |
+| `Home` | Moves focus to the first tab |
+| `End` | Moves focus to the last tab |
+| `Enter` / `Space` | Activates the focused tab (in manual activation mode) |
+
+### Automatic vs. Manual Activation
+
+There are two activation strategies:
+
+- **Automatic** (default): Focus and selection happen together. Arrow keys both move focus and select the tab.
+- **Manual**: Arrow keys only move focus. The user must press `Enter` or `Space` to select.
+
+Automatic activation is recommended for most cases because it reduces the number of keystrokes needed. Manual activation is useful when switching tabs triggers expensive operations (like network requests).
+
+## Component API Design
+
+```tsx
+interface TabsProps {
+  value?: string;              // Controlled selected tab
+  defaultValue?: string;       // Uncontrolled default
+  onValueChange?: (value: string) => void;
+  orientation?: "horizontal" | "vertical";
+  activationMode?: "automatic" | "manual";
+}
+```
+
+Compound components:
+
+- **`Tabs.Root`** — Manages selected tab state and provides context.
+- **`Tabs.List`** — The `tablist` container with roving tabindex.
+- **`Tabs.Tab`** — Individual tab buttons.
+- **`Tabs.Panel`** — Content panels.
+
+## Full Implementation
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface TabsContextValue {
+  selectedValue: string;
+  selectTab: (value: string) => void;
+  orientation: "horizontal" | "vertical";
+  activationMode: "automatic" | "manual";
+  registerTab: (value: string, element: HTMLElement) => void;
+  tabElements: React.RefObject<Map<string, HTMLElement>>;
+}
+
+const TabsContext = React.createContext<TabsContextValue | null>(null);
+
+function useTabsContext() {
+  const ctx = React.useContext(TabsContext);
+  if (!ctx) throw new Error("Tabs sub-components must be used within Tabs.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  value: controlledValue,
+  defaultValue = "",
+  onValueChange,
+  orientation = "horizontal",
+  activationMode = "automatic",
+  children,
+  ...props
+}: TabsProps & React.ComponentPropsWithoutRef<"div">) {
+  const [selectedValue, setSelectedValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const tabElements = React.useRef(new Map<string, HTMLElement>());
+
+  const current = controlledValue ?? selectedValue;
+
+  const selectTab = React.useCallback(
+    (val: string) => {
+      if (controlledValue === undefined) setSelectedValue(val);
+      onValueChange?.(val);
+    },
+    [controlledValue, onValueChange],
+  );
+
+  const registerTab = React.useCallback(
+    (val: string, el: HTMLElement) => {
+      tabElements.current.set(val, el);
+    },
+    [],
+  );
+
+  const ctx = React.useMemo(
+    () => ({
+      selectedValue: current,
+      selectTab,
+      orientation,
+      activationMode,
+      registerTab,
+      tabElements,
+    }),
+    [current, selectTab, orientation, activationMode, registerTab],
+  );
+
+  return (
+    <TabsContext value={ctx}>
+      <div data-orientation={orientation} {...props}>
+        {children}
+      </div>
+    </TabsContext>
+  );
+}
+
+// --- List ---
+
+function List({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { orientation } = useTabsContext();
+
+  return (
+    <div
+      role="tablist"
+      aria-orientation={orientation}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+// --- Tab ---
+
+function Tab({
+  value,
+  children,
+  ...props
+}: { value: string } & React.ComponentPropsWithoutRef<"button">) {
+  const {
+    selectedValue,
+    selectTab,
+    orientation,
+    activationMode,
+    registerTab,
+    tabElements,
+  } = useTabsContext();
+
+  const isSelected = selectedValue === value;
+  const tabId = `tab-${React.useId()}`;
+  const panelId = `panel-${React.useId()}`;
+
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) registerTab(value, el);
+    },
+    [value, registerTab],
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const tabs = Array.from(tabElements.current.entries());
+    const currentIdx = tabs.findIndex(([v]) => v === value);
+    const count = tabs.length;
+
+    const forwardKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+    const backwardKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
+
+    let nextIdx: number | null = null;
+
+    if (e.key === forwardKey) {
+      e.preventDefault();
+      nextIdx = (currentIdx + 1) % count;
+    } else if (e.key === backwardKey) {
+      e.preventDefault();
+      nextIdx = (currentIdx - 1 + count) % count;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIdx = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIdx = count - 1;
+    }
+
+    if (nextIdx !== null) {
+      const [nextValue, nextEl] = tabs[nextIdx];
+      nextEl.focus();
+      if (activationMode === "automatic") selectTab(nextValue);
+    }
+
+    if (activationMode === "manual" && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      selectTab(value);
+    }
+  };
+
+  return (
+    <button
+      role="tab"
+      type="button"
+      id={tabId}
+      ref={ref}
+      aria-selected={isSelected}
+      aria-controls={panelId}
+      tabIndex={isSelected ? 0 : -1}
+      data-state={isSelected ? "active" : "inactive"}
+      onClick={() => selectTab(value)}
+      onKeyDown={handleKeyDown}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Panel ---
+
+function Panel({
+  value,
+  children,
+  forceMount = false,
+  ...props
+}: { value: string; forceMount?: boolean } & React.ComponentPropsWithoutRef<"div">) {
+  const { selectedValue } = useTabsContext();
+  const isSelected = selectedValue === value;
+
+  if (!isSelected && !forceMount) return null;
+
+  return (
+    <div
+      role="tabpanel"
+      data-state={isSelected ? "active" : "inactive"}
+      hidden={!isSelected}
+      tabIndex={0}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export const Tabs = { Root, List, Tab, Panel };
+```
+
+## Lazy vs. Eager Panel Rendering
+
+There are two strategies for rendering tab panels:
+
+### Lazy Rendering (Default)
+
+Only the selected panel is mounted. When the user switches tabs, the previous panel unmounts and the new one mounts. This is memory-efficient but loses internal state (e.g., scroll position, form inputs) when switching.
+
+```tsx
+// Lazy: only selected panel is in the DOM
+{tabs.map((tab) => (
+  <Tabs.Panel key={tab.value} value={tab.value}>
+    <ExpensiveComponent />
+  </Tabs.Panel>
+))}
+```
+
+### Eager Rendering (forceMount)
+
+All panels are mounted at all times, but only the selected one is visible. This preserves state across tab switches but keeps all panels in memory.
+
+```tsx
+// Eager: all panels mounted, inactive ones are hidden
+{tabs.map((tab) => (
+  <Tabs.Panel key={tab.value} value={tab.value} forceMount>
+    <StatefulForm />
+  </Tabs.Panel>
+))}
+```
+
+The `forceMount` prop keeps the panel in the DOM and uses `hidden` to toggle visibility. This is useful when panels contain forms or scrollable content where the user expects their state to persist.
+
+### Which to Choose?
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Static content | Lazy (smaller DOM) |
+| Forms with user input | Eager (preserve state) |
+| Heavy data fetching | Lazy (avoid unnecessary requests) |
+| Scrollable content | Eager (preserve scroll position) |
+
+## Styling Active Tabs
+
+The `data-state` attribute enables CSS-only styling:
+
+```css
+[role="tab"][data-state="active"] {
+  border-bottom: 2px solid var(--color-accent);
+  color: var(--color-accent);
+}
+
+[role="tab"][data-state="inactive"] {
+  color: var(--color-muted);
+}
+```
+
+## Key Takeaways
+
+1. **`role="tablist"`, `role="tab"`, `role="tabpanel"`** create the semantic structure screen readers need.
+2. **`aria-selected`** on tabs announces the current selection state.
+3. **Roving tabindex** makes the tab list a single tab stop with arrow key navigation.
+4. **Automatic activation** selects tabs on focus; **manual** requires Enter/Space.
+5. **Lazy rendering** unmounts inactive panels; **eager (forceMount)** preserves their state.
+6. **`aria-controls` and `aria-labelledby`** link tabs to their panels bidirectionally.
+
+## Try It Yourself
+
+<Exercise id="tabs-basic" />

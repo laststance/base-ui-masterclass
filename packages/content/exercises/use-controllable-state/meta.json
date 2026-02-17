@@ -1,0 +1,27 @@
+{
+  "id": "use-controllable-state",
+  "title": {
+    "en": "Implement useControllableState",
+    "ja": "useControllableStateを実装する"
+  },
+  "difficulty": "intermediate",
+  "module": "02-toggle-state",
+  "order": 1,
+  "hints": {
+    "en": [
+      "Check if the component is controlled by testing `value !== undefined`",
+      "Use React.useState for internal state, initialized with defaultValue",
+      "The resolved value is: controlled ? controlledValue : internalValue",
+      "Only call setInternalValue when NOT controlled",
+      "Always call onChange in both modes"
+    ],
+    "ja": [
+      "`value !== undefined` でコントロールドかどうかを判定しましょう",
+      "React.useStateで内部状態を管理し、defaultValueで初期化しましょう",
+      "解決値は: controlled ? controlledValue : internalValue です",
+      "コントロールドでない場合のみsetInternalValueを呼びましょう",
+      "どちらのモードでもonChangeを常に呼びましょう"
+    ]
+  },
+  "dependencies": {}
+}

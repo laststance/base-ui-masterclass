@@ -1,0 +1,25 @@
+{
+  "id": "progress-basic",
+  "title": {
+    "en": "Build a Progress Component",
+    "ja": "Progressコンポーネントを構築する"
+  },
+  "difficulty": "beginner",
+  "module": "04-data-display",
+  "order": 1,
+  "hints": {
+    "en": [
+      "Use role='progressbar' on the root container element",
+      "Calculate percentage as Math.round(((value - min) / (max - min)) * 100)",
+      "When value is null or undefined, omit aria-valuenow and set data-state to 'indeterminate'",
+      "Expose --progress-value as a CSS custom property using the style prop"
+    ],
+    "ja": [
+      "ルートコンテナ要素にrole='progressbar'を使用しましょう",
+      "パーセンテージはMath.round(((value - min) / (max - min)) * 100)で計算します",
+      "valueがnullまたはundefinedの場合、aria-valuenowを省略しdata-stateを'indeterminate'に設定します",
+      "--progress-valueをstyleプロパティでCSSカスタムプロパティとして公開します"
+    ]
+  },
+  "dependencies": {}
+}

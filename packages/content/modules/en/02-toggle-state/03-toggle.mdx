@@ -1,0 +1,246 @@
+---
+title: "Building Toggle & ToggleGroup"
+description: "Build a Toggle button with aria-pressed and a ToggleGroup that manages exclusive or multiple selection using React Context."
+order: 3
+isFree: false
+---
+
+# Building Toggle & ToggleGroup
+
+The Toggle is similar to Switch but semantically different. A switch represents an on/off setting; a toggle represents a **pressed/unpressed** button state -- like bold, italic, or alignment buttons in a text editor.
+
+The ToggleGroup takes this further by managing a **group** of toggles with single or multiple selection, introducing React Context for the first time in our library.
+
+## Toggle vs. Switch
+
+| Aspect | Switch | Toggle |
+|--------|--------|--------|
+| ARIA role | `role="switch"` | Native button |
+| State attribute | `aria-checked` | `aria-pressed` |
+| Semantic meaning | Setting on/off | Action active/inactive |
+| Typical UI | Settings panel | Toolbar buttons |
+
+## Part 1: The Toggle Component
+
+### Step 1: Define Props
+
+```tsx
+import * as React from "react";
+import { useControllableState } from "./use-controllable-state";
+
+interface ToggleProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  /** Controlled pressed state */
+  pressed?: boolean;
+  /** Initial pressed state for uncontrolled mode */
+  defaultPressed?: boolean;
+  /** Callback fired when the pressed state changes */
+  onPressedChange?: (pressed: boolean) => void;
+  /** Value identifier used by ToggleGroup */
+  value?: string;
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+### Step 2: Implement
+
+```tsx
+export function Toggle({
+  pressed: controlledPressed,
+  defaultPressed = false,
+  onPressedChange,
+  disabled,
+  value,
+  render,
+  ref,
+  ...props
+}: ToggleProps) {
+  // Check if we are inside a ToggleGroup
+  const group = React.useContext(ToggleGroupContext);
+
+  // If inside a group, delegate state to the group
+  const isInGroup = group !== null && value !== undefined;
+  const groupPressed = isInGroup ? group.isSelected(value) : undefined;
+
+  const [pressed, setPressed] = useControllableState({
+    value: isInGroup ? groupPressed : controlledPressed,
+    defaultValue: defaultPressed,
+    onChange: (next) => {
+      if (isInGroup && value !== undefined) {
+        group.toggle(value);
+      }
+      onPressedChange?.(next);
+    },
+  });
+
+  const handleClick = () => {
+    if (!disabled) {
+      setPressed(!pressed);
+    }
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    disabled,
+    type: "button" as const,
+    "aria-pressed": pressed,
+    onClick: handleClick,
+    "data-pressed": pressed || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+## Part 2: The ToggleGroup
+
+The ToggleGroup needs to manage which toggles are selected. It supports two modes:
+
+| Mode | Behavior | Value type |
+|------|----------|------------|
+| `"single"` | Only one toggle can be pressed at a time | `string` |
+| `"multiple"` | Any number can be pressed | `string[]` |
+
+### Step 1: Define the Context
+
+```tsx
+interface ToggleGroupContextValue {
+  isSelected: (value: string) => boolean;
+  toggle: (value: string) => void;
+}
+
+const ToggleGroupContext = React.createContext<ToggleGroupContextValue | null>(null);
+```
+
+### Step 2: Build the ToggleGroup Component
+
+```tsx
+interface ToggleGroupProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** Selection mode */
+  type: "single" | "multiple";
+  /** Controlled value */
+  value?: string | string[];
+  /** Initial value for uncontrolled mode */
+  defaultValue?: string | string[];
+  /** Callback when selection changes */
+  onValueChange?: (value: string | string[]) => void;
+  /** Disable all toggles in the group */
+  disabled?: boolean;
+  ref?: React.Ref<HTMLDivElement>;
+}
+
+export function ToggleGroup({
+  type,
+  value: controlledValue,
+  defaultValue = type === "single" ? "" : [],
+  onValueChange,
+  disabled,
+  children,
+  ref,
+  ...props
+}: ToggleGroupProps) {
+  const [value, setValue] = useControllableState({
+    value: controlledValue,
+    defaultValue,
+    onChange: onValueChange,
+  });
+
+  const contextValue = React.useMemo<ToggleGroupContextValue>(() => ({
+    isSelected: (itemValue: string) => {
+      if (type === "single") {
+        return value === itemValue;
+      }
+      return Array.isArray(value) && value.includes(itemValue);
+    },
+    toggle: (itemValue: string) => {
+      if (type === "single") {
+        // In single mode, toggle off if already selected, otherwise select
+        setValue(value === itemValue ? "" : itemValue);
+      } else {
+        // In multiple mode, add or remove from the array
+        const current = Array.isArray(value) ? value : [];
+        const next = current.includes(itemValue)
+          ? current.filter((v) => v !== itemValue)
+          : [...current, itemValue];
+        setValue(next);
+      }
+    },
+  }), [type, value, setValue]);
+
+  return (
+    <ToggleGroupContext value={contextValue}>
+      <div
+        ref={ref}
+        role="group"
+        {...props}
+        data-disabled={disabled || undefined}
+      >
+        {children}
+      </div>
+    </ToggleGroupContext>
+  );
+}
+```
+
+Note: We use the React 19 context provider syntax `<ToggleGroupContext value={...}>` instead of the older `<ToggleGroupContext.Provider value={...}>`.
+
+## Usage Examples
+
+### Standalone Toggle
+
+```tsx
+<Toggle defaultPressed={false}>
+  <BoldIcon />
+</Toggle>
+```
+
+### Single Selection Group
+
+```tsx
+<ToggleGroup type="single" defaultValue="left">
+  <Toggle value="left"><AlignLeftIcon /></Toggle>
+  <Toggle value="center"><AlignCenterIcon /></Toggle>
+  <Toggle value="right"><AlignRightIcon /></Toggle>
+</ToggleGroup>
+```
+
+### Multiple Selection Group
+
+```tsx
+<ToggleGroup type="multiple" defaultValue={["bold"]}>
+  <Toggle value="bold"><BoldIcon /></Toggle>
+  <Toggle value="italic"><ItalicIcon /></Toggle>
+  <Toggle value="underline"><UnderlineIcon /></Toggle>
+</ToggleGroup>
+```
+
+## Styling
+
+```css
+.toggle[data-pressed] {
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+}
+
+.toggle-group[data-disabled] .toggle {
+  opacity: 0.5;
+  pointer-events: none;
+}
+```
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| `aria-pressed` | Communicates pressed/unpressed state for toggles |
+| React Context | Share group state with child components |
+| Single vs. multiple | Different selection strategies with the same API |
+| Compound components | Parent (ToggleGroup) + children (Toggle) communicate via context |
+
+This is the first compound component pattern in the course. It will reappear in Tabs, Accordion, Menu, and nearly every complex component.

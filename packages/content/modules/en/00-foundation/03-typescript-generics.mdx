@@ -1,0 +1,288 @@
+---
+title: "TypeScript Generics for UI Libraries"
+description: "Learn how TypeScript generics enable type-safe, flexible component APIs — from basic generic props to constrained generics and real-world patterns used in Base UI."
+order: 3
+isFree: true
+---
+
+# TypeScript Generics for UI Libraries
+
+A headless UI library lives or dies by its TypeScript experience. If autocomplete is wrong, if event handlers lose their types, or if value constraints are ignored, developers will abandon the library no matter how good the runtime behavior is. **Generics** are the tool that makes all of this work.
+
+This lesson covers the generic patterns you will use throughout this course — not as abstract theory, but as practical techniques for building real components.
+
+## Why Generics Matter for Headless UI
+
+Consider a `Select` component. The value a user selects could be a `string`, a `number`, or a complex object like `{ id: number; label: string }`. Without generics, you have three options — all bad:
+
+| Approach | Problem |
+|----------|---------|
+| `value: string` | Forces consumers to stringify everything |
+| `value: any` | No type safety at all |
+| `value: string \| number \| object` | Loose union, no autocomplete for specific shapes |
+
+With generics, the component **infers** the type from usage:
+
+```tsx
+// The consumer writes this — and TypeScript infers Value = User
+<Select.Root value={currentUser} onValueChange={(user) => setUser(user)}>
+  {users.map((u) => (
+    <Select.Option key={u.id} value={u}>
+      {u.name}
+    </Select.Option>
+  ))}
+</Select.Root>
+```
+
+The `onValueChange` callback is correctly typed as `(value: User) => void` without the consumer writing a single type annotation. This is the power of generics.
+
+## Generic Fundamentals
+
+### A Generic Function
+
+At its core, a generic is a **type parameter** — a placeholder that gets filled in when the function is called.
+
+```tsx
+/**
+ * Returns the first element of an array with its type preserved.
+ *
+ * @example
+ * const n = first([1, 2, 3]); // type: number
+ * const s = first(["a", "b"]); // type: string
+ */
+function first<T>(items: T[]): T {
+  return items[0];
+}
+```
+
+`T` is not a concrete type. It is a variable that TypeScript fills in from context. When you call `first([1, 2, 3])`, TypeScript infers `T = number` and the return type becomes `number`.
+
+### A Generic React Component
+
+The same principle applies to React components. A generic component accepts a type parameter that flows through its props.
+
+```tsx
+interface ListProps<T> {
+  items: T[];
+  renderItem: (item: T) => React.ReactNode;
+}
+
+/**
+ * A generic list component that renders any item type.
+ *
+ * @example
+ * <List items={users} renderItem={(user) => <span>{user.name}</span>} />
+ */
+function List<T>(props: ListProps<T>) {
+  return <ul>{props.items.map((item, i) => <li key={i}>{props.renderItem(item)}</li>)}</ul>;
+}
+```
+
+When the consumer passes `items={users}`, TypeScript infers `T = User`, and the `renderItem` callback receives `(item: User) => ...` with full autocomplete.
+
+## Constrained Generics
+
+Not all types are valid for every component. A `Combobox` might require its value type to be something that can be compared with `===`. A `Tabs` component might require string keys. **Constraints** let you restrict what `T` can be.
+
+```tsx
+/**
+ * Finds an item by its `id` property.
+ * T is constrained to objects that have an `id` field.
+ *
+ * @example
+ * const user = findById(users, 1); // Works because User has `id`
+ * findById([1, 2, 3], 1); // Error: number has no `id` property
+ */
+function findById<T extends { id: number }>(items: T[], id: number): T | undefined {
+  return items.find((item) => item.id === id);
+}
+```
+
+The `extends` keyword is the constraint. `T extends { id: number }` means "T can be any type, as long as it has at least an `id` property of type `number`."
+
+### Constraints in Component Props
+
+Here's a realistic constrained generic for a Select component:
+
+```tsx
+interface SelectRootProps<Value> {
+  value?: Value;
+  defaultValue?: Value;
+  onValueChange?: (value: Value) => void;
+  children: React.ReactNode;
+}
+
+/**
+ * A generic Select root that preserves the value type.
+ *
+ * @example
+ * // Value inferred as string
+ * <SelectRoot defaultValue="apple" onValueChange={(v) => console.log(v)}>
+ *   ...
+ * </SelectRoot>
+ *
+ * @example
+ * // Value inferred as { id: number; label: string }
+ * <SelectRoot<Fruit> value={selectedFruit} onValueChange={setSelectedFruit}>
+ *   ...
+ * </SelectRoot>
+ */
+function SelectRoot<Value>(props: SelectRootProps<Value>) {
+  // implementation
+}
+```
+
+Notice that `Value` has no constraint — any type is valid. But you could add one:
+
+```tsx
+// Only allow values that can be displayed as strings
+function SelectRoot<Value extends { toString(): string }>(
+  props: SelectRootProps<Value>
+) { /* ... */ }
+```
+
+## Multiple Type Parameters
+
+Some components need more than one generic. Base UI's `Combobox`, for example, has both a `Value` type and a `Multiple` flag that changes the return type.
+
+```tsx
+interface ComboboxProps<Value, Multiple extends boolean | undefined = false> {
+  multiple?: Multiple;
+  value?: Multiple extends true ? Value[] : Value;
+  onValueChange?: Multiple extends true
+    ? (values: Value[]) => void
+    : (value: Value) => void;
+}
+```
+
+This is a **conditional type** driven by a generic parameter. When `Multiple` is `true`, the value becomes an array. When `false` (or omitted), it stays singular.
+
+```tsx
+// Single select — value is Fruit, callback receives Fruit
+<Combobox value={apple} onValueChange={(fruit) => { /* Fruit */ }} />
+
+// Multi select — value is Fruit[], callback receives Fruit[]
+<Combobox multiple value={[apple, banana]} onValueChange={(fruits) => { /* Fruit[] */ }} />
+```
+
+This pattern is used heavily in Base UI's Select, Combobox, and ToggleGroup components.
+
+## Forwarding Generics Through Context
+
+In compound components, generics must flow from the Root through Context to subcomponents. This is one of the trickier patterns.
+
+```tsx
+interface SelectContextValue<Value> {
+  selectedValue: Value | null;
+  onSelect: (value: Value) => void;
+}
+
+// The context must use `any` for the default because the generic
+// is not known at context creation time.
+const SelectContext = React.createContext<SelectContextValue<any> | null>(null);
+
+/**
+ * Type-safe hook that casts the context to the correct generic type.
+ *
+ * @example
+ * const { selectedValue, onSelect } = useSelectContext<User>();
+ */
+function useSelectContext<Value>(): SelectContextValue<Value> {
+  const ctx = React.useContext(SelectContext);
+  if (!ctx) throw new Error("Must be used within Select.Root");
+  return ctx as SelectContextValue<Value>;
+}
+```
+
+The `as` cast is safe here because the Root component creates the context with the correct type — we just lose it at the `createContext` boundary and recover it in the hook.
+
+## The `render` Prop and Polymorphic Types
+
+Base UI components accept a `render` prop that lets you replace the underlying DOM element. Making this type-safe requires generics.
+
+```tsx
+type RenderProp<Props> = React.ReactElement | ((props: Props) => React.ReactElement);
+
+interface TriggerProps {
+  render?: RenderProp<React.ButtonHTMLAttributes<HTMLButtonElement>>;
+  children?: React.ReactNode;
+}
+
+/**
+ * A trigger button that can be rendered as any element.
+ *
+ * @example
+ * // Default: renders a <button>
+ * <Trigger>Click me</Trigger>
+ *
+ * @example
+ * // Custom: renders a <div> with button props merged
+ * <Trigger render={<MyCustomButton />}>Click me</Trigger>
+ *
+ * @example
+ * // Function form: full control
+ * <Trigger render={(props) => <a {...props} href="/page">Link</a>}>
+ *   Navigate
+ * </Trigger>
+ */
+function Trigger({ render, children }: TriggerProps) {
+  const triggerProps = {
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: () => { /* toggle logic */ },
+  };
+
+  if (typeof render === "function") {
+    return render(triggerProps);
+  }
+
+  if (React.isValidElement(render)) {
+    return React.cloneElement(render, triggerProps);
+  }
+
+  return <button {...triggerProps}>{children}</button>;
+}
+```
+
+## Base UI's Prop Types Pattern
+
+Base UI exposes its prop types through namespaces, making it easy to create typed wrappers:
+
+```tsx
+import { Tooltip } from "@base-ui/react/tooltip";
+
+// Access the exact prop type for a subcomponent
+function MyTooltip(props: Tooltip.Root.Props) {
+  return <Tooltip.Root {...props} />;
+}
+
+// Generic wrapper for Combobox that forwards the type parameter
+function MyCombobox<Value, Multiple extends boolean | undefined = false>(
+  props: Combobox.Root.Props<Value, Multiple>,
+): React.JSX.Element {
+  return <Combobox.Root {...props} />;
+}
+```
+
+This pattern ensures your wrapper components stay in sync with Base UI's types automatically.
+
+## Quick Reference
+
+| Pattern | When to Use | Example |
+|---------|-------------|---------|
+| `<T>` basic generic | Component accepts any value type | `List<T>`, `SelectRoot<Value>` |
+| `T extends Constraint` | Value must have certain shape | `T extends { id: string }` |
+| Multiple generics | Behavior changes based on mode | `<Value, Multiple extends boolean>` |
+| Conditional types | Return type depends on a flag | `Multiple extends true ? V[] : V` |
+| Context forwarding | Share generic type through context | `useSelectContext<Value>()` |
+| `render` prop typing | Polymorphic element replacement | `RenderProp<ButtonHTMLAttributes>` |
+
+## Exercise
+
+Create a generic `RadioGroup` component with these requirements:
+
+1. `RadioGroup.Root<Value>` accepts `value`, `defaultValue`, and `onValueChange` — all typed to `Value`.
+2. `RadioGroup.Item` accepts `value: Value` and renders a radio button.
+3. Write a consumer that uses `RadioGroup` with `Value = "small" | "medium" | "large"` and verify that TypeScript catches invalid values like `"xl"`.
+
+This exercise will solidify your understanding of how generics flow from Root through Context to leaf components — the exact pattern you will use for every component in this course.

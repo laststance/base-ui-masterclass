@@ -1,0 +1,305 @@
+---
+title: "Building a Headless Checkbox"
+description: "Build a headless Checkbox component with indeterminate state support, the CheckboxIndicator compound component pattern, and proper aria-checked values."
+order: 4
+isFree: false
+---
+
+# Building a Headless Checkbox
+
+The Checkbox introduces a concept that native HTML handles poorly: the **indeterminate state**. It also introduces the **Indicator** compound component pattern, which Base UI uses extensively for visual state representation.
+
+## The Three States of a Checkbox
+
+Unlike a Switch (which is binary), a Checkbox has three possible states:
+
+| State | `aria-checked` | Meaning |
+|-------|---------------|---------|
+| Unchecked | `"false"` | Not selected |
+| Checked | `"true"` | Selected |
+| Indeterminate | `"mixed"` | Partially selected (e.g., parent of a group) |
+
+The indeterminate state cannot be set via HTML attributes alone. In native HTML, you must set `element.indeterminate = true` via JavaScript. In our headless component, we model it explicitly.
+
+## Step 1: Define the Props
+
+```tsx
+import * as React from "react";
+import { useControllableState } from "./use-controllable-state";
+
+type CheckedState = boolean | "indeterminate";
+
+interface CheckboxProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  /** Controlled checked state */
+  checked?: CheckedState;
+  /** Initial checked state for uncontrolled mode */
+  defaultChecked?: CheckedState;
+  /** Callback fired when checked state changes */
+  onCheckedChange?: (checked: CheckedState) => void;
+  /** Whether the checkbox is required */
+  required?: boolean;
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+We model `CheckedState` as `boolean | "indeterminate"` rather than a three-value enum. This keeps the common case (true/false) ergonomic while supporting the special case explicitly.
+
+## Step 2: Implement the Root Component
+
+```tsx
+export function Checkbox({
+  checked: controlledChecked,
+  defaultChecked = false,
+  onCheckedChange,
+  disabled,
+  required,
+  render,
+  ref,
+  children,
+  ...props
+}: CheckboxProps) {
+  const [checked, setChecked] = useControllableState<CheckedState>({
+    value: controlledChecked,
+    defaultValue: defaultChecked,
+    onChange: onCheckedChange,
+  });
+
+  const handleClick = () => {
+    if (!disabled) {
+      // Indeterminate always transitions to checked
+      setChecked(checked === true ? false : true);
+    }
+  };
+
+  // Map our CheckedState to aria-checked values
+  const ariaChecked = checked === "indeterminate" ? "mixed" : checked;
+
+  const elementProps = {
+    ...props,
+    ref,
+    role: "checkbox" as const,
+    "aria-checked": ariaChecked,
+    "aria-required": required || undefined,
+    disabled,
+    type: "button" as const,
+    onClick: handleClick,
+    "data-checked": checked === true || undefined,
+    "data-unchecked": checked === false || undefined,
+    "data-indeterminate": checked === "indeterminate" || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  // Provide state to child Indicator via context
+  const contextValue = React.useMemo(
+    () => ({ checked, disabled }),
+    [checked, disabled],
+  );
+
+  const element = render
+    ? React.cloneElement(render, elementProps)
+    : <button {...elementProps}>{children}</button>;
+
+  return (
+    <CheckboxContext value={contextValue}>
+      {element}
+    </CheckboxContext>
+  );
+}
+```
+
+### Key decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| `role="checkbox"` on `<button>` | Native `<input type="checkbox">` is hard to style; a button with ARIA is fully accessible and style-free |
+| Indeterminate becomes checked on click | Standard behavior -- there is no way to "cycle back" to indeterminate via user interaction |
+| `aria-checked="mixed"` | The ARIA spec value for indeterminate; not `"indeterminate"` |
+
+## Step 3: The CheckboxIndicator Pattern
+
+The Indicator is a child component that renders only when the checkbox is in a specific state. This allows consumers to provide custom check icons, animated SVGs, or any visual:
+
+```tsx
+interface CheckboxContextValue {
+  checked: CheckedState;
+  disabled?: boolean;
+}
+
+const CheckboxContext = React.createContext<CheckboxContextValue>({
+  checked: false,
+});
+
+interface CheckboxIndicatorProps extends React.ComponentPropsWithoutRef<"span"> {
+  /**
+   * When true, the indicator renders in all states (checked and indeterminate).
+   * When false (default), it only renders when checked.
+   * @default false
+   */
+  keepMounted?: boolean;
+  ref?: React.Ref<HTMLSpanElement>;
+}
+
+export function CheckboxIndicator({
+  keepMounted = false,
+  children,
+  ref,
+  ...props
+}: CheckboxIndicatorProps) {
+  const { checked } = React.useContext(CheckboxContext);
+
+  const isVisible = checked === true || checked === "indeterminate";
+
+  // If not keepMounted and not visible, render nothing
+  if (!keepMounted && !isVisible) {
+    return null;
+  }
+
+  return (
+    <span
+      ref={ref}
+      {...props}
+      data-checked={checked === true || undefined}
+      data-unchecked={checked === false || undefined}
+      data-indeterminate={checked === "indeterminate" || undefined}
+      // Hidden when not visible but keepMounted
+      hidden={!isVisible ? true : undefined}
+    >
+      {children}
+    </span>
+  );
+}
+```
+
+## Step 4: Hidden Native Input
+
+For form submission, we need a hidden native `<input>` that carries the checkbox value:
+
+```tsx
+function BubbleInput({
+  checked,
+  ...props
+}: React.ComponentPropsWithoutRef<"input"> & { checked: CheckedState }) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // Sync the indeterminate property (can't be set via attributes)
+  React.useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = checked === "indeterminate";
+    }
+  }, [checked]);
+
+  return (
+    <input
+      ref={inputRef}
+      type="checkbox"
+      checked={checked === true}
+      {...props}
+      style={{
+        position: "absolute",
+        pointerEvents: "none",
+        opacity: 0,
+        margin: 0,
+        ...props.style,
+      }}
+      tabIndex={-1}
+      aria-hidden
+    />
+  );
+}
+```
+
+This hidden input lets the checkbox work in native `<form>` submissions and integrates with form validation APIs.
+
+## Usage Examples
+
+### Basic
+
+```tsx
+<Checkbox defaultChecked={false}>
+  <CheckboxIndicator>
+    <CheckIcon />
+  </CheckboxIndicator>
+</Checkbox>
+```
+
+### With Indeterminate
+
+```tsx
+function SelectAllCheckbox({ items, selected }: Props) {
+  const allSelected = selected.length === items.length;
+  const someSelected = selected.length > 0 && !allSelected;
+
+  return (
+    <Checkbox
+      checked={allSelected ? true : someSelected ? "indeterminate" : false}
+      onCheckedChange={(checked) => {
+        if (checked === true) {
+          selectAll();
+        } else {
+          deselectAll();
+        }
+      }}
+    >
+      <CheckboxIndicator>
+        {someSelected ? <MinusIcon /> : <CheckIcon />}
+      </CheckboxIndicator>
+    </Checkbox>
+  );
+}
+```
+
+### Controlled with Label
+
+```tsx
+function AgreeCheckbox() {
+  const [agreed, setAgreed] = React.useState<CheckedState>(false);
+
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <Checkbox checked={agreed} onCheckedChange={setAgreed}>
+        <CheckboxIndicator>
+          <CheckIcon />
+        </CheckboxIndicator>
+      </Checkbox>
+      I agree to the terms and conditions
+    </label>
+  );
+}
+```
+
+## Styling
+
+```css
+.checkbox[data-checked] {
+  background: var(--color-primary-500);
+  border-color: var(--color-primary-500);
+}
+
+.checkbox[data-indeterminate] {
+  background: var(--color-primary-300);
+  border-color: var(--color-primary-300);
+}
+
+.checkbox[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox-indicator[data-indeterminate] svg {
+  transform: scaleX(0.6);
+}
+```
+
+## Recap
+
+| Concept | What you learned |
+|---------|-----------------|
+| Tri-state modeling | `boolean \| "indeterminate"` with `aria-checked="mixed"` |
+| Indicator pattern | Compound component that conditionally renders based on parent state |
+| Hidden native input | Enables form submission and syncs `indeterminate` property |
+| Context for compound components | Parent shares state with children via React Context |
+
+The Checkbox completes the Toggle & State module. You now have the tools to handle binary state (Switch), pressed state (Toggle), grouped state (ToggleGroup), and tri-state (Checkbox). Next, we dive into the Form System.
+
+<Exercise id="checkbox-basic" />

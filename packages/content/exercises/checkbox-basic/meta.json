@@ -1,0 +1,27 @@
+{
+  "id": "checkbox-basic",
+  "title": {
+    "en": "Build a Headless Checkbox",
+    "ja": "ヘッドレスCheckboxを構築する"
+  },
+  "difficulty": "intermediate",
+  "module": "02-toggle-state",
+  "order": 4,
+  "hints": {
+    "en": [
+      "Use role='checkbox' on the button element",
+      "Map indeterminate to aria-checked='mixed', true to 'true', false to 'false'",
+      "When clicked, indeterminate and unchecked both transition to checked (true)",
+      "Use data-checked, data-unchecked, and data-indeterminate for the three states",
+      "Use `controlledChecked !== undefined` to detect controlled mode"
+    ],
+    "ja": [
+      "button要素にrole='checkbox'を設定しましょう",
+      "indeterminateはaria-checked='mixed'に、trueは'true'に、falseは'false'にマッピングしましょう",
+      "クリック時、indeterminateとuncheckedは両方ともchecked（true）に遷移します",
+      "3つの状態にdata-checked、data-unchecked、data-indeterminateを使いましょう",
+      "`controlledChecked !== undefined` でコントロールドモードを検出しましょう"
+    ]
+  },
+  "dependencies": {}
+}
