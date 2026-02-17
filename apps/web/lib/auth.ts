@@ -1,54 +1,63 @@
-import NextAuth from "next-auth";
-import GitHub from "next-auth/providers/github";
-import Google from "next-auth/providers/google";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import { betterAuth } from "better-auth";
+import { prismaAdapter } from "better-auth/adapters/prisma";
+import { nextCookies } from "better-auth/next-js";
+import { headers } from "next/headers";
 import { prisma } from "@base-ui-masterclass/database";
 
 /**
- * Auth.js v5 configuration with Prisma adapter.
+ * BetterAuth server instance with Prisma adapter.
  * Supports GitHub and Google OAuth providers.
- * Session callback attaches user ID and purchase status.
  *
  * @example
- * // In a Server Component:
+ * // In a Server Component or Server Action:
  * import { auth } from "@/lib/auth";
- * const session = await auth();
+ * import { headers } from "next/headers";
+ * const session = await auth.api.getSession({ headers: await headers() });
  * if (session?.user?.id) { ... }
- *
- * @example
- * // In a Route Handler:
- * import { handlers } from "@/lib/auth";
- * export const { GET, POST } = handlers;
  */
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  providers: [GitHub, Google],
-  pages: {
-    signIn: "/login",
-  },
-  callbacks: {
-    async session({ session, user }) {
-      session.user.id = user.id;
-
-      // Attach purchase status to session
-      const purchase = await prisma.purchase.findUnique({
-        where: { userId: user.id },
-        select: { status: true },
-      });
-      (session as SessionWithPurchase).hasPurchased =
-        purchase?.status === "active";
-
-      return session;
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, { provider: "postgresql" }),
+  baseURL: process.env.NEXT_PUBLIC_APP_URL,
+  socialProviders: {
+    github: {
+      clientId: process.env.AUTH_GITHUB_ID!,
+      clientSecret: process.env.AUTH_GITHUB_SECRET!,
+    },
+    google: {
+      clientId: process.env.AUTH_GOOGLE_ID!,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET!,
     },
   },
+  plugins: [nextCookies()],
 });
 
-interface SessionWithPurchase {
-  hasPurchased: boolean;
+/**
+ * Session with purchase status for paywall checks.
+ * Queries the Purchase table and attaches `hasPurchased` to the session.
+ *
+ * @returns Session with hasPurchased flag, or null if unauthenticated
+ *
+ * @example
+ * const session = await getSessionWithPurchase();
+ * if (session?.hasPurchased) { // render premium content }
+ */
+export async function getSessionWithPurchase() {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+  if (!session) return null;
+
+  const purchase = await prisma.purchase.findUnique({
+    where: { userId: session.user.id },
+    select: { status: true },
+  });
+
+  return {
+    ...session,
+    hasPurchased: purchase?.status === "active",
+  };
 }
 
-declare module "next-auth" {
-  interface Session {
-    hasPurchased?: boolean;
-  }
-}
+export type SessionWithPurchase = NonNullable<
+  Awaited<ReturnType<typeof getSessionWithPurchase>>
+>;

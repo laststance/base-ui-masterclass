@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@base-ui-masterclass/database";
 
@@ -9,7 +10,9 @@ import { prisma } from "@base-ui-masterclass/database";
  * // Response: [{ exerciseId: "button-basic", completedAt: "2026-02-18T..." }]
  */
 export async function GET() {
-  const session = await auth();
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -33,7 +36,9 @@ export async function GET() {
  * // Response: { success: true, completedAt: "2026-02-18T..." }
  */
 export async function POST(request: NextRequest) {
-  const session = await auth();
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getLocale } from "next-intl/server";
+import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { getUserProgress } from "@/lib/actions/progress";
 import {
@@ -18,7 +19,9 @@ import {
  * // /dashboard → shows progress for the authenticated user
  */
 export default async function DashboardPage() {
-  const session = await auth();
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
   if (!session?.user) {
     redirect("/login");
   }

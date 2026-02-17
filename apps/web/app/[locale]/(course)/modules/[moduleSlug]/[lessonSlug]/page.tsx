@@ -8,7 +8,7 @@ import {
   type Locale,
 } from "@base-ui-masterclass/content";
 import { compileLessonMDX } from "@/lib/mdx";
-import { auth } from "@/lib/auth";
+import { getSessionWithPurchase } from "@/lib/auth";
 import { PaywallGuard } from "@/components/course/paywall-guard";
 
 /**
@@ -68,7 +68,7 @@ export default async function LessonPage({
   }
 
   // Premium lessons require auth + purchase
-  const session = await auth();
+  const session = await getSessionWithPurchase();
 
   return (
     <PaywallGuard session={session}>

@@ -1,8 +1,8 @@
-import type { Session } from "next-auth";
+import type { SessionWithPurchase } from "@/lib/auth";
 import Link from "next/link";
 
 interface PaywallGuardProps {
-  session: Session | null;
+  session: SessionWithPurchase | null;
   children: React.ReactNode;
 }
 
@@ -11,11 +11,11 @@ interface PaywallGuardProps {
  * Shows a paywall UI for unauthenticated or non-purchased users.
  * Renders children for users with active purchases.
  *
- * @param session - Auth.js session (null if unauthenticated)
+ * @param session - BetterAuth session with hasPurchased flag (null if unauthenticated)
  * @param children - Protected content to render for purchasers
  *
  * @example
- * const session = await auth();
+ * const session = await getSessionWithPurchase();
  * <PaywallGuard session={session}>
  *   <LessonContent />
  * </PaywallGuard>
