@@ -1,6 +1,7 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { getExercise, type Locale } from "@base-ui-masterclass/content";
 import { ExerciseSandpack } from "./exercise-sandpack";
+import { isExerciseCompleted } from "@/lib/actions/progress";
 
 interface ExerciseProviderProps {
   exerciseId: string;
@@ -10,6 +11,7 @@ interface ExerciseProviderProps {
  * Server component that loads exercise data and renders the Sandpack environment.
  * Fetches initial code, solution, tests, and hints from the content package,
  * then passes them to the ExerciseSandpack client component.
+ * Also queries whether the current user has already completed this exercise.
  *
  * @param exerciseId - Exercise directory name (e.g. "button-basic")
  *
@@ -32,6 +34,8 @@ export async function ExerciseProvider({ exerciseId }: ExerciseProviderProps) {
     );
   }
 
+  const completed = await isExerciseCompleted(exercise.meta.id).catch(() => false);
+
   return (
     <ExerciseSandpack
       exerciseId={exercise.meta.id}
@@ -40,6 +44,7 @@ export async function ExerciseProvider({ exerciseId }: ExerciseProviderProps) {
       testCode={exercise.files.tests}
       hints={exercise.meta.hints[locale] ?? exercise.meta.hints.en}
       dependencies={exercise.meta.dependencies}
+      initialCompleted={completed}
     />
   );
 }
