@@ -90,7 +90,13 @@ export const mdxComponents = {
       {...props}
     />
   ),
+  tbody: (props: ComponentPropsWithoutRef<"tbody">) => (
+    <tbody className="divide-y divide-border-subtle" {...props} />
+  ),
+  tr: (props: ComponentPropsWithoutRef<"tr">) => (
+    <tr className="hover:bg-surface-elevated/50 transition-colors" {...props} />
+  ),
   td: (props: ComponentPropsWithoutRef<"td">) => (
-    <td className="px-4 py-2 text-text-secondary border-t border-border-subtle" {...props} />
+    <td className="px-4 py-2 text-text-secondary" {...props} />
   ),
 };
