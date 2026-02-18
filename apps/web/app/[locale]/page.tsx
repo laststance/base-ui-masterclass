@@ -509,13 +509,13 @@ export default async function HomePage() {
             >
               <ExternalLink
                 href="https://github.com/laststance/base-ui-masterclass"
-                className="font-mono text-sm text-text-muted transition-colors hover:text-text-primary"
+                className="inline-flex items-center min-h-[44px] font-mono text-sm text-text-muted transition-colors hover:text-text-primary"
               >
                 GitHub
               </ExternalLink>
               <ExternalLink
                 href="https://discord.gg/base-ui-masterclass"
-                className="font-mono text-sm text-text-muted transition-colors hover:text-text-primary"
+                className="inline-flex items-center min-h-[44px] font-mono text-sm text-text-muted transition-colors hover:text-text-primary"
               >
                 Discord
               </ExternalLink>
