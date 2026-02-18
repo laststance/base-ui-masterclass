@@ -1,4 +1,4 @@
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { getExercise, type Locale } from "@base-ui-masterclass/content";
 import { ExerciseSandpack } from "./exercise-sandpack";
 
@@ -22,10 +22,11 @@ export async function ExerciseProvider({ exerciseId }: ExerciseProviderProps) {
   const exercise = getExercise(exerciseId);
 
   if (!exercise) {
+    const t = await getTranslations("exercise");
     return (
       <div className="my-8 rounded-lg border border-error/30 bg-error/5 p-6 text-center">
         <p className="text-sm text-error">
-          Exercise &quot;{exerciseId}&quot; not found.
+          {t("notFound", { id: exerciseId })}
         </p>
       </div>
     );
@@ -38,7 +39,6 @@ export async function ExerciseProvider({ exerciseId }: ExerciseProviderProps) {
       solutionCode={exercise.files.solution}
       testCode={exercise.files.tests}
       hints={exercise.meta.hints[locale] ?? exercise.meta.hints.en}
-      locale={locale}
       dependencies={exercise.meta.dependencies}
     />
   );

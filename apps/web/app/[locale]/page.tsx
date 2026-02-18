@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getLocale } from "next-intl/server";
 import { modules, type Locale } from "@base-ui-masterclass/content";
+import { ExternalLink } from "@/components/ui/external-link";
 
 /**
  * Premium landing page for the Base UI Masterclass course ($500).
@@ -506,22 +507,18 @@ export default async function HomePage() {
               aria-label={isJa ? "フッターリンク" : "Footer links"}
               className="flex items-center gap-6"
             >
-              <a
+              <ExternalLink
                 href="https://github.com/laststance/base-ui-masterclass"
-                target="_blank"
-                rel="noopener noreferrer"
                 className="font-mono text-sm text-text-muted transition-colors hover:text-text-primary"
               >
                 GitHub
-              </a>
-              <a
+              </ExternalLink>
+              <ExternalLink
                 href="https://discord.gg/base-ui-masterclass"
-                target="_blank"
-                rel="noopener noreferrer"
                 className="font-mono text-sm text-text-muted transition-colors hover:text-text-primary"
               >
                 Discord
-              </a>
+              </ExternalLink>
             </nav>
           </div>
         </footer>

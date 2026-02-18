@@ -1,5 +1,6 @@
 import type { SessionWithPurchase } from "@/lib/auth";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 interface PaywallGuardProps {
   session: SessionWithPurchase | null;
@@ -21,11 +22,14 @@ interface PaywallGuardProps {
  *   <LessonContent />
  * </PaywallGuard>
  */
-export function PaywallGuard({ session, children }: PaywallGuardProps) {
+export async function PaywallGuard({ session, children }: PaywallGuardProps) {
   // User has active purchase — render content
   if (session?.hasPurchased) {
     return <>{children}</>;
   }
+
+  const t = await getTranslations("paywall");
+  const tCommon = await getTranslations("common");
 
   // Not authenticated
   if (!session) {
@@ -48,17 +52,16 @@ export function PaywallGuard({ session, children }: PaywallGuardProps) {
             </svg>
           </div>
           <h2 className="mb-3 text-2xl font-display font-700 text-text-primary">
-            Sign in to access this lesson
+            {t("signInTitle")}
           </h2>
           <p className="mb-8 text-text-secondary leading-relaxed">
-            This is a premium lesson. Sign in with your account and verify your
-            license to continue.
+            {t("signInDescription")}
           </p>
           <Link
             href="/login"
             className="inline-flex h-12 items-center rounded-lg bg-accent px-8 text-sm font-semibold text-background transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            Sign In
+            {tCommon("signIn")}
           </Link>
         </div>
       </div>
@@ -85,11 +88,10 @@ export function PaywallGuard({ session, children }: PaywallGuardProps) {
           </svg>
         </div>
         <h2 className="mb-3 text-2xl font-display font-700 text-text-primary">
-          Purchase Required
+          {t("purchaseTitle")}
         </h2>
         <p className="mb-4 text-text-secondary leading-relaxed">
-          Get lifetime access to all 35 components, 45 lessons, and the
-          Discord community.
+          {t("purchaseDescription")}
         </p>
         <p className="mb-8 text-3xl font-display font-800 text-accent">$500</p>
         <div className="flex flex-col gap-3">
@@ -97,13 +99,13 @@ export function PaywallGuard({ session, children }: PaywallGuardProps) {
             href="#pricing"
             className="inline-flex h-12 items-center justify-center rounded-lg bg-accent px-8 text-sm font-semibold text-background transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            Buy Now
+            {t("buyNow")}
           </a>
           <Link
             href="/license"
             className="text-sm text-text-muted hover:text-text-secondary transition-colors"
           >
-            Already purchased? Enter your license key
+            {t("enterLicense")}
           </Link>
         </div>
       </div>

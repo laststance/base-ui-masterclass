@@ -65,7 +65,7 @@ export const mdxComponents = {
   ),
   code: (props: ComponentPropsWithoutRef<"code">) => (
     <code
-      className="rounded-md bg-surface-elevated border border-border px-1.5 py-0.5 text-[0.85em] font-mono text-accent"
+      className="rounded-md bg-surface-elevated border border-border px-1.5 py-0.5 text-xs font-mono text-accent"
       {...props}
     />
   ),

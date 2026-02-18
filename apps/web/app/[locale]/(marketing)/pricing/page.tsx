@@ -205,7 +205,9 @@ export default async function PricingPage() {
 
           {/* ---- Pricing card ---- */}
           <div className="relative mx-auto max-w-md rounded-xl border border-accent/30 bg-surface p-10 shadow-[0_0_80px_-20px_rgba(232,185,49,0.15)]">
-            {/* Subtle gold glow ring */}
+            {/* One-off decorative gold glow ring using accent color (#e8b931 = rgba(232,185,49)).
+                Uses CSS mask-composite trick for a 1px gradient border effect.
+                Not extracted to utility — unique to this pricing card layout. */}
             <div
               className="pointer-events-none absolute -inset-px rounded-xl"
               style={{
