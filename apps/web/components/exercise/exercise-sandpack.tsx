@@ -291,6 +291,12 @@ export function ExerciseSandpack({
 
       {/* Test result banner + Complete button */}
       <div role="status" aria-live="polite" aria-atomic="true">
+        {!testResult && (
+          <div className="border-t border-border px-4 py-3 flex items-center gap-2">
+            <div className="h-3 w-3 rounded-full border-2 border-text-muted border-t-transparent animate-spin" />
+            <span className="text-xs text-text-muted">{t("runningTests")}</span>
+          </div>
+        )}
         {testResult && (
           <div
             className={`border-t px-4 py-3 flex items-center justify-between ${

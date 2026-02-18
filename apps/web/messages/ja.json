@@ -41,7 +41,8 @@
     "testsFailed": "{count}件のテストが失敗しました",
     "markComplete": "完了にする",
     "completed": "完了済み",
-    "completing": "保存中..."
+    "completing": "保存中...",
+    "runningTests": "テスト実行中..."
   },
   "nav": {
     "dashboard": "ダッシュボード",

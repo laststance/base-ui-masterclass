@@ -41,7 +41,8 @@
     "testsFailed": "{count} test(s) failed",
     "markComplete": "Mark Complete",
     "completed": "Completed",
-    "completing": "Saving..."
+    "completing": "Saving...",
+    "runningTests": "Running tests..."
   },
   "nav": {
     "dashboard": "Dashboard",
