@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useTransition } from "react";
+import { useState, useCallback, useTransition, useEffect, useRef } from "react";
 import {
   SandpackProvider,
   SandpackLayout,
   SandpackCodeEditor,
   SandpackTests,
+  useActiveCode,
 } from "@codesandbox/sandpack-react";
 import { useTranslations } from "next-intl";
 import { useExercisePersistence } from "./use-exercise-persistence";
@@ -65,6 +66,43 @@ function summarizeSpecs(
   }
 
   return { status: failed === 0 && passed > 0 ? "pass" : "fail", passed, failed };
+}
+
+/**
+ * Bridges Sandpack's internal editor state with the persistence hook.
+ * Must be rendered inside SandpackProvider. Skips the initial render
+ * to avoid overwriting loaded code, and ignores changes while
+ * the solution is displayed.
+ *
+ * @param onCodeChange - Callback to persist code (from useExercisePersistence)
+ * @param disabled - When true, changes are not persisted (e.g. viewing solution)
+ *
+ * @example
+ * <SandpackProvider>
+ *   <CodePersistenceListener onCodeChange={setCode} disabled={showSolution} />
+ * </SandpackProvider>
+ */
+function CodePersistenceListener({
+  onCodeChange,
+  disabled,
+}: {
+  onCodeChange: (code: string) => void;
+  disabled: boolean;
+}) {
+  const { code } = useActiveCode();
+  const isInitialRef = useRef(true);
+
+  useEffect(() => {
+    if (isInitialRef.current) {
+      isInitialRef.current = false;
+      return;
+    }
+    if (!disabled) {
+      onCodeChange(code);
+    }
+  }, [code, onCodeChange, disabled]);
+
+  return null;
 }
 
 /**
@@ -237,6 +275,7 @@ export function ExerciseSandpack({
         }}
         theme={SANDPACK_THEME}
       >
+        <CodePersistenceListener onCodeChange={setCode} disabled={showSolution} />
         <SandpackLayout>
           <SandpackCodeEditor
             showLineNumbers
