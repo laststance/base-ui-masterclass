@@ -5,19 +5,23 @@ import { modules, type Locale, type ModuleConfig } from "../config";
 
 /**
  * Resolves the modules directory path.
+ * Prefers CONTENT_MODULES_DIR env override for non-standard working directories.
+ * Falls back to process.cwd()-based resolution (assumes cwd is apps/web).
  * Uses process.cwd() instead of __dirname because Next.js transpilePackages
  * changes __dirname to the compiled output path inside .next/server/.
  *
  * @returns Absolute path to packages/content/modules
  */
-const MODULES_DIR = path.join(
-  process.cwd(),
-  "..",
-  "..",
-  "packages",
-  "content",
-  "modules",
-);
+const MODULES_DIR =
+  process.env.CONTENT_MODULES_DIR ||
+  path.join(process.cwd(), "..", "..", "packages", "content", "modules");
+
+if (!fs.existsSync(MODULES_DIR)) {
+  throw new Error(
+    `[packages/content] MODULES_DIR not found: "${MODULES_DIR}". ` +
+      `Ensure the process is started from apps/web or set CONTENT_MODULES_DIR.`,
+  );
+}
 
 export interface LessonFrontmatter {
   title: string;

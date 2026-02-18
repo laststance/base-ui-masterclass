@@ -66,7 +66,10 @@ export async function createTestUser(
  */
 export async function createTestSession(userId: string) {
   const token = randomBytes(32).toString("hex");
-  const secret = process.env.BETTER_AUTH_SECRET || "";
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (!secret) {
+    throw new Error("BETTER_AUTH_SECRET must be set for E2E session seeding");
+  }
 
   await prisma.session.create({
     data: {
@@ -80,15 +83,17 @@ export async function createTestSession(userId: string) {
 
   // BetterAuth expects signed cookies: `token.base64(hmac-sha256(token, secret))`
   const signedValue = signCookieValue(token, secret);
+  const baseUrl = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
+  const domain = new URL(baseUrl).hostname;
 
   return [
     {
       name: SESSION_COOKIE_NAME,
       value: signedValue,
-      domain: "localhost",
+      domain,
       path: "/",
       httpOnly: true,
-      secure: false,
+      secure: new URL(baseUrl).protocol === "https:",
       sameSite: "Lax" as const,
     },
   ];

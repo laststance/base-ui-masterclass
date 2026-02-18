@@ -10,7 +10,7 @@ import { prisma } from "@base-ui-masterclass/database";
  * Skipped when E2E_TESTING=true since OAuth is bypassed via testUtils.
  */
 function validateAuthEnv() {
-  if (process.env.E2E_TESTING === "true") return;
+  if (process.env.E2E_TESTING === "true" && process.env.NODE_ENV !== "production") return;
 
   const requiredEnvVars = [
     "AUTH_GITHUB_ID",

@@ -30,7 +30,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "E2E_TESTING=true pnpm dev",
+    command: "pnpm dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
