@@ -4,6 +4,7 @@ import { getMessages } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { hasLocale } from "next-intl";
 import { routing } from "@/i18n/routing";
+import { SiteHeader } from "@/components/layout/site-header";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -60,6 +61,7 @@ export default async function LocaleLayout({
       </head>
       <body>
         <NextIntlClientProvider messages={messages}>
+          <SiteHeader />
           {children}
         </NextIntlClientProvider>
       </body>

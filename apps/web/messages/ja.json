@@ -43,6 +43,11 @@
     "completed": "完了済み",
     "completing": "保存中..."
   },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "modules": "モジュール",
+    "signIn": "ログイン"
+  },
   "paywall": {
     "signInTitle": "このレッスンにアクセスするにはログインが必要です",
     "signInDescription": "これはプレミアムレッスンです。アカウントにログインし、ライセンスを確認してください。",
