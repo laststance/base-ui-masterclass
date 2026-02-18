@@ -389,7 +389,7 @@ export default async function PricingPage() {
           <div className="flex flex-wrap items-center justify-center gap-4">
             <CheckoutButton />
             <Link
-              href="/modules"
+              href={`/${locale}/modules`}
               className="inline-flex h-14 items-center rounded-lg border border-border px-10 text-base font-semibold text-text-primary transition-colors hover:bg-surface hover:border-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               {locale === "ja" ? "カリキュラムを見る" : "View Curriculum"}

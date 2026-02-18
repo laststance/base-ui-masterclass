@@ -36,8 +36,8 @@ export default async function ModulePage({
     <main className="min-h-screen px-6 py-16">
       <div className="mx-auto max-w-3xl">
         <Link
-          href="/modules"
-          className="mb-8 inline-flex items-center gap-2 text-sm text-text-muted hover:text-text-secondary transition-colors"
+          href={`/${locale}/modules`}
+          className="mb-8 inline-flex items-center gap-2 min-h-[44px] text-sm text-text-muted hover:text-text-secondary transition-colors"
         >
           <svg
             className="h-4 w-4"
@@ -52,7 +52,7 @@ export default async function ModulePage({
               d="M15 19l-7-7 7-7"
             />
           </svg>
-          All Modules
+          {locale === "ja" ? "全モジュール" : "All Modules"}
         </Link>
 
         <div className="mb-2 text-sm font-mono text-accent uppercase tracking-wider">
