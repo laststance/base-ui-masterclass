@@ -34,7 +34,7 @@ export async function ExerciseProvider({ exerciseId }: ExerciseProviderProps) {
     );
   }
 
-  const completed = await isExerciseCompleted(exercise.meta.id);
+  const completed = await isExerciseCompleted(exercise.meta.id).catch(() => false);
 
   return (
     <ExerciseSandpack

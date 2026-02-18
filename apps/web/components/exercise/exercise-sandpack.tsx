@@ -50,7 +50,7 @@ function summarizeSpecs(
     if (node.tests) {
       for (const test of Object.values(node.tests)) {
         if (test.status === "pass") passed++;
-        else if (test.status === "fail") failed++;
+        else if (test.status === "fail" || test.status === "error") failed++;
       }
     }
     if (node.describes) {
@@ -134,9 +134,15 @@ export function ExerciseSandpack({
 
   const handleMarkComplete = useCallback(() => {
     startTransition(async () => {
-      const result = await completeExercise(exerciseId);
-      if (result.success) {
-        setIsCompleted(true);
+      try {
+        const result = await completeExercise(exerciseId);
+        if (result.success) {
+          setIsCompleted(true);
+        } else {
+          console.error("Failed to mark exercise complete:", result.error);
+        }
+      } catch (err) {
+        console.error("Unexpected error marking exercise complete:", err);
       }
     });
   }, [exerciseId]);
@@ -245,40 +251,42 @@ export function ExerciseSandpack({
       </SandpackProvider>
 
       {/* Test result banner + Complete button */}
-      {testResult && (
-        <div
-          className={`border-t px-4 py-3 flex items-center justify-between ${
-            allPassed
-              ? "bg-success/5 border-success/20"
-              : "bg-error/5 border-error/20"
-          }`}
-        >
-          <span
-            className={`text-sm font-semibold ${
-              allPassed ? "text-success" : "text-error"
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {testResult && (
+          <div
+            className={`border-t px-4 py-3 flex items-center justify-between ${
+              allPassed
+                ? "bg-success/5 border-success/20"
+                : "bg-error/5 border-error/20"
             }`}
           >
-            {allPassed
-              ? t("allTestsPassed")
-              : t("testsFailed", { count: testResult.failed })}
-          </span>
-          {allPassed && !isCompleted && (
-            <button
-              type="button"
-              onClick={handleMarkComplete}
-              disabled={isPending}
-              className="text-sm px-4 py-1.5 rounded-md bg-success text-background font-semibold hover:bg-success/90 disabled:opacity-60 transition-colors"
+            <span
+              className={`text-sm font-semibold ${
+                allPassed ? "text-success" : "text-error"
+              }`}
             >
-              {isPending ? t("completing") : t("markComplete")}
-            </button>
-          )}
-          {allPassed && isCompleted && (
-            <span className="text-sm text-success font-semibold">
-              {t("completed")}
+              {allPassed
+                ? t("allTestsPassed")
+                : t("testsFailed", { count: testResult.failed })}
             </span>
-          )}
-        </div>
-      )}
+            {allPassed && !isCompleted && (
+              <button
+                type="button"
+                onClick={handleMarkComplete}
+                disabled={isPending}
+                className="text-sm px-4 py-2.5 min-h-[44px] rounded-md bg-success text-background font-semibold hover:bg-success/90 disabled:opacity-60 transition-colors"
+              >
+                {isPending ? t("completing") : t("markComplete")}
+              </button>
+            )}
+            {allPassed && isCompleted && (
+              <span className="text-sm text-success font-semibold">
+                {t("completed")}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Solution indicator */}
       {showSolution && (
