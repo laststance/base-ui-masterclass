@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Locale } from "../config";
 
-const EXERCISES_DIR = path.join(__dirname, "..", "exercises");
+const EXERCISES_DIR =
+  process.env.CONTENT_EXERCISES_DIR ||
+  path.join(process.cwd(), "..", "..", "packages", "content", "exercises");
 
 export interface ExerciseMeta {
   id: string;
