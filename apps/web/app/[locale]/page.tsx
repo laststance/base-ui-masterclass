@@ -217,13 +217,13 @@ export default async function HomePage() {
             {/* CTA buttons */}
             <div className="animate-fade-in-delay-3 mt-12 flex flex-wrap items-center justify-center gap-4">
               <Link
-                href="/modules/00-foundation/01-introduction"
+                href={`/${locale}/modules/00-foundation/01-introduction`}
                 className="inline-flex h-12 min-w-[180px] items-center justify-center rounded-lg border border-border px-8 font-display text-sm font-semibold text-text-primary transition-colors hover:border-text-muted hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               >
                 {isJa ? "無料プレビュー" : "Start Free Preview"}
               </Link>
               <Link
-                href="/pricing"
+                href={`/${locale}/pricing`}
                 className="inline-flex h-12 min-w-[180px] items-center justify-center rounded-lg bg-accent px-8 font-display text-sm font-semibold text-background transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               >
                 {isJa ? "購入する — $500" : "Buy Now — $500"}
@@ -479,13 +479,13 @@ export default async function HomePage() {
 
               <div className="mt-8 flex flex-col gap-3">
                 <Link
-                  href="/pricing"
+                  href={`/${locale}/pricing`}
                   className="inline-flex h-12 items-center justify-center rounded-lg bg-accent px-8 font-display text-sm font-semibold text-background transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                   {isJa ? "購入する" : "Buy Now"}
                 </Link>
                 <Link
-                  href="/modules/00-foundation/01-introduction"
+                  href={`/${locale}/modules/00-foundation/01-introduction`}
                   className="inline-flex h-12 items-center justify-center rounded-lg border border-border px-8 font-display text-sm font-semibold text-text-primary transition-colors hover:border-text-muted hover:bg-surface-elevated focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                   {isJa ? "まず無料プレビュー" : "Start Free Preview"}
