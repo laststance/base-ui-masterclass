@@ -1,5 +1,6 @@
 import { compileMDX } from "next-mdx-remote/rsc";
 import rehypeShiki from "@shikijs/rehype";
+import remarkGfm from "remark-gfm";
 import type { LessonFrontmatter } from "@base-ui-masterclass/content";
 import { mdxComponents } from "@/components/mdx";
 
@@ -21,6 +22,7 @@ export async function compileLessonMDX(source: string) {
     options: {
       parseFrontmatter: false,
       mdxOptions: {
+        remarkPlugins: [remarkGfm],
         rehypePlugins: [
           [
             rehypeShiki,

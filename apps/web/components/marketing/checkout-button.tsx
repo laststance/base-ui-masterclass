@@ -38,6 +38,7 @@ export function CheckoutButton({
       aria-disabled={!CHECKOUT_URL}
       className={cn(
         "lemonsqueezy-button inline-flex h-14 items-center justify-center rounded-lg bg-accent px-10 text-base font-semibold text-background transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        !CHECKOUT_URL && "opacity-50 cursor-not-allowed hover:bg-accent",
         className,
       )}
     >

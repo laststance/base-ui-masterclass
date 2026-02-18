@@ -41,7 +41,17 @@
     "testsFailed": "{count} test(s) failed",
     "markComplete": "Mark Complete",
     "completed": "Completed",
-    "completing": "Saving..."
+    "completing": "Saving...",
+    "runningTests": "Running tests...",
+    "completionToast": "Exercise completed! Great work."
+  },
+  "dashboard": {
+    "lessonsNoExercises": "{count} lessons (no exercises)",
+    "comingSoon": "Coming soon"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "modules": "Modules"
   },
   "paywall": {
     "signInTitle": "Sign in to access this lesson",

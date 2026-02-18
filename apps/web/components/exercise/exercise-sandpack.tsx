@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useTransition } from "react";
+import { useState, useCallback, useTransition, useEffect, useRef } from "react";
 import {
   SandpackProvider,
   SandpackLayout,
   SandpackCodeEditor,
   SandpackTests,
+  useActiveCode,
 } from "@codesandbox/sandpack-react";
 import { useTranslations } from "next-intl";
 import { useExercisePersistence } from "./use-exercise-persistence";
@@ -68,6 +69,43 @@ function summarizeSpecs(
 }
 
 /**
+ * Bridges Sandpack's internal editor state with the persistence hook.
+ * Must be rendered inside SandpackProvider. Skips the initial render
+ * to avoid overwriting loaded code, and ignores changes while
+ * the solution is displayed.
+ *
+ * @param onCodeChange - Callback to persist code (from useExercisePersistence)
+ * @param disabled - When true, changes are not persisted (e.g. viewing solution)
+ *
+ * @example
+ * <SandpackProvider>
+ *   <CodePersistenceListener onCodeChange={setCode} disabled={showSolution} />
+ * </SandpackProvider>
+ */
+function CodePersistenceListener({
+  onCodeChange,
+  disabled,
+}: {
+  onCodeChange: (code: string) => void;
+  disabled: boolean;
+}) {
+  const { code } = useActiveCode();
+  const isInitialRef = useRef(true);
+
+  useEffect(() => {
+    if (isInitialRef.current) {
+      isInitialRef.current = false;
+      return;
+    }
+    if (!disabled) {
+      onCodeChange(code);
+    }
+  }, [code, onCodeChange, disabled]);
+
+  return null;
+}
+
+/**
  * Interactive exercise environment powered by Sandpack.
  * Provides code editor, test runner, hints, solution reveal,
  * test-pass detection, and exercise completion.
@@ -108,6 +146,7 @@ export function ExerciseSandpack({
   const [hintIndex, setHintIndex] = useState(-1);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
+  const [showCompletionToast, setShowCompletionToast] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const handleShowNextHint = useCallback(() => {
@@ -138,6 +177,8 @@ export function ExerciseSandpack({
         const result = await completeExercise(exerciseId);
         if (result.success) {
           setIsCompleted(true);
+          setShowCompletionToast(true);
+          setTimeout(() => setShowCompletionToast(false), 3000);
         } else {
           console.error("Failed to mark exercise complete:", result.error);
         }
@@ -153,8 +194,8 @@ export function ExerciseSandpack({
   return (
     <div className="my-8 rounded-lg border border-accent/30 overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center justify-between bg-surface px-4 py-2 border-b border-border">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-surface px-4 py-2 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="h-2 w-2 rounded-full bg-accent" />
           <span className="text-xs font-mono text-text-muted">
             {exerciseId}
@@ -170,13 +211,13 @@ export function ExerciseSandpack({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
           {hints.length > 0 && (
             <button
               type="button"
               onClick={handleShowNextHint}
               disabled={hintIndex >= hints.length - 1}
-              className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors"
+              className="text-xs px-2 sm:px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors inline-flex items-center"
             >
               {t("hint")}{" "}
               ({Math.min(hintIndex + 2, hints.length)}/{hints.length})
@@ -185,14 +226,14 @@ export function ExerciseSandpack({
           <button
             type="button"
             onClick={handleToggleSolution}
-            className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors"
+            className="text-xs px-2 sm:px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors inline-flex items-center"
           >
             {showSolution ? t("myCode") : t("solution")}
           </button>
           <button
             type="button"
             onClick={handleReset}
-            className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors"
+            className="text-xs px-2 sm:px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors inline-flex items-center"
           >
             {t("reset")}
           </button>
@@ -237,6 +278,7 @@ export function ExerciseSandpack({
         }}
         theme={SANDPACK_THEME}
       >
+        <CodePersistenceListener onCodeChange={setCode} disabled={showSolution} />
         <SandpackLayout>
           <SandpackCodeEditor
             showLineNumbers
@@ -252,6 +294,12 @@ export function ExerciseSandpack({
 
       {/* Test result banner + Complete button */}
       <div role="status" aria-live="polite" aria-atomic="true">
+        {!testResult && (
+          <div className="border-t border-border px-4 py-3 flex items-center gap-2">
+            <div className="h-3 w-3 rounded-full border-2 border-text-muted border-t-transparent animate-spin" />
+            <span className="text-xs text-text-muted">{t("runningTests")}</span>
+          </div>
+        )}
         {testResult && (
           <div
             className={`border-t px-4 py-3 flex items-center justify-between ${
@@ -294,6 +342,17 @@ export function ExerciseSandpack({
           <span className="text-xs text-success font-semibold">
             {t("solutionIndicator")}
           </span>
+        </div>
+      )}
+
+      {/* Completion toast */}
+      {showCompletionToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 animate-[fade-in-up_0.3s_ease-out] rounded-lg bg-success px-5 py-3 text-sm font-semibold text-background shadow-lg"
+        >
+          {t("completionToast")}
         </div>
       )}
     </div>

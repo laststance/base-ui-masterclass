@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth";
 import { getUserProgress } from "@/lib/actions/progress";
 import {
   modules,
   getExercisesForModule,
+  getLessonsForModule,
   type Locale,
 } from "@base-ui-masterclass/content";
 
@@ -30,18 +31,21 @@ export default async function DashboardPage() {
   }
 
   const locale = (await getLocale()) as Locale;
+  const t = await getTranslations("dashboard");
   const progress = await getUserProgress();
   const completedIds = new Set(progress.map((p) => p.exerciseId));
 
   // Calculate per-module progress
   const moduleProgress = modules.map((mod) => {
     const exercises = getExercisesForModule(mod.slug);
+    const lessons = getLessonsForModule(mod.slug, locale);
     const total = exercises.length;
     const completed = exercises.filter((e) => completedIds.has(e.id)).length;
     return {
       ...mod,
       total,
       completed,
+      lessonCount: lessons.length,
       percentage: total > 0 ? Math.round((completed / total) * 100) : 0,
     };
   });
@@ -137,7 +141,9 @@ export default async function DashboardPage() {
                 )}
                 {mod.total === 0 && (
                   <p className="text-xs text-text-muted">
-                    {locale === "ja" ? "準備中" : "Coming soon"}
+                    {mod.lessonCount > 0
+                      ? t("lessonsNoExercises", { count: mod.lessonCount })
+                      : t("comingSoon")}
                   </p>
                 )}
               </div>
