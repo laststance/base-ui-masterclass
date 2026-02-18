@@ -84,16 +84,16 @@ export async function createTestSession(userId: string) {
   // BetterAuth expects signed cookies: `token.base64(hmac-sha256(token, secret))`
   const signedValue = signCookieValue(token, secret);
   const baseUrl = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
-  const domain = new URL(baseUrl).hostname;
+  const parsedUrl = new URL(baseUrl);
 
   return [
     {
       name: SESSION_COOKIE_NAME,
       value: signedValue,
-      domain,
+      domain: parsedUrl.hostname,
       path: "/",
       httpOnly: true,
-      secure: new URL(baseUrl).protocol === "https:",
+      secure: parsedUrl.protocol === "https:",
       sameSite: "Lax" as const,
     },
   ];
@@ -130,8 +130,12 @@ export async function createTestPurchase(userId: string, email: string) {
  * await cleanupTestUser(user.id);
  */
 export async function cleanupTestUser(userId: string) {
-  await prisma.purchase.deleteMany({ where: { userId } }).catch(() => {});
-  await prisma.user.delete({ where: { id: userId } }).catch(() => {});
+  await prisma.purchase
+    .deleteMany({ where: { userId } })
+    .catch((e) => console.warn(`[E2E cleanup] Failed to delete purchases for ${userId}:`, e.message));
+  await prisma.user
+    .delete({ where: { id: userId } })
+    .catch((e) => console.warn(`[E2E cleanup] Failed to delete user ${userId}:`, e.message));
 }
 
 export { prisma };

@@ -1,8 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
+
 /**
  * Playwright configuration for E2E tests.
- * Uses BetterAuth testUtils plugin for OAuth bypass.
+ * Bypasses OAuth via Prisma session seeding (see e2e/helpers/).
  *
  * @example
  * pnpm --filter web test:e2e          # run all tests
@@ -17,7 +19,7 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "html",
 
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000",
+    baseURL: BASE_URL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -31,7 +33,7 @@ export default defineConfig({
 
   webServer: {
     command: "pnpm dev",
-    url: "http://localhost:3000",
+    url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
     env: {
