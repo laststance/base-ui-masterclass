@@ -45,10 +45,13 @@
     "runningTests": "Running tests...",
     "completionToast": "Exercise completed! Great work."
   },
+  "dashboard": {
+    "lessonsNoExercises": "{count} lessons (no exercises)",
+    "comingSoon": "Coming soon"
+  },
   "nav": {
     "dashboard": "Dashboard",
-    "modules": "Modules",
-    "signIn": "Sign In"
+    "modules": "Modules"
   },
   "paywall": {
     "signInTitle": "Sign in to access this lesson",

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/auth";
 import { getUserProgress } from "@/lib/actions/progress";
 import {
@@ -31,6 +31,7 @@ export default async function DashboardPage() {
   }
 
   const locale = (await getLocale()) as Locale;
+  const t = await getTranslations("dashboard");
   const progress = await getUserProgress();
   const completedIds = new Set(progress.map((p) => p.exerciseId));
 
@@ -141,12 +142,8 @@ export default async function DashboardPage() {
                 {mod.total === 0 && (
                   <p className="text-xs text-text-muted">
                     {mod.lessonCount > 0
-                      ? locale === "ja"
-                        ? `${mod.lessonCount}レッスン（演習なし）`
-                        : `${mod.lessonCount} lessons (no exercises)`
-                      : locale === "ja"
-                        ? "準備中"
-                        : "Coming soon"}
+                      ? t("lessonsNoExercises", { count: mod.lessonCount })
+                      : t("comingSoon")}
                   </p>
                 )}
               </div>

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import {
   modules,
   getLessonsForModule,
@@ -24,6 +24,7 @@ export default async function ModulePage({
 }) {
   const { moduleSlug } = await params;
   const locale = (await getLocale()) as Locale;
+  const t = await getTranslations("course");
 
   const moduleConfig = modules.find((m) => m.slug === moduleSlug);
   if (!moduleConfig) {
@@ -52,7 +53,7 @@ export default async function ModulePage({
               d="M15 19l-7-7 7-7"
             />
           </svg>
-          {locale === "ja" ? "全モジュール" : "All Modules"}
+          {t("allModules")}
         </Link>
 
         <div className="mb-2 text-sm font-mono text-accent uppercase tracking-wider">

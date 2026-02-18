@@ -45,10 +45,13 @@
     "runningTests": "テスト実行中...",
     "completionToast": "エクササイズ完了！お疲れ様でした。"
   },
+  "dashboard": {
+    "lessonsNoExercises": "{count}レッスン（演習なし）",
+    "comingSoon": "準備中"
+  },
   "nav": {
     "dashboard": "ダッシュボード",
-    "modules": "モジュール",
-    "signIn": "ログイン"
+    "modules": "モジュール"
   },
   "paywall": {
     "signInTitle": "このレッスンにアクセスするにはログインが必要です",

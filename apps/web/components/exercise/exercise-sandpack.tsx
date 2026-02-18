@@ -347,7 +347,11 @@ export function ExerciseSandpack({
 
       {/* Completion toast */}
       {showCompletionToast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-[fade-in-up_0.3s_ease-out] rounded-lg bg-success px-5 py-3 text-sm font-semibold text-background shadow-lg">
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 animate-[fade-in-up_0.3s_ease-out] rounded-lg bg-success px-5 py-3 text-sm font-semibold text-background shadow-lg"
+        >
           {t("completionToast")}
         </div>
       )}

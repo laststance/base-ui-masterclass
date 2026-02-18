@@ -3,6 +3,7 @@
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
+import { useTranslations } from "next-intl";
 
 /**
  * Authenticated user menu showing avatar initial and sign-out button.
@@ -10,6 +11,7 @@ import { useTransition } from "react";
  *
  * @param userName - Display name of the signed-in user
  * @param userImage - Optional avatar URL
+ * @returns {JSX.Element} The authenticated user menu UI.
  *
  * @example
  * <UserMenu userName="Alice" />
@@ -21,14 +23,19 @@ export function UserMenu({
   userName: string;
   userImage?: string | null;
 }) {
+  const t = useTranslations("common");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const initial = userName.charAt(0).toUpperCase();
 
   const handleSignOut = () => {
     startTransition(async () => {
-      await authClient.signOut();
-      router.refresh();
+      try {
+        await authClient.signOut();
+        router.refresh();
+      } catch (err) {
+        console.error("Sign-out failed:", err);
+      }
     });
   };
 
@@ -51,7 +58,7 @@ export function UserMenu({
         disabled={isPending}
         className="inline-flex items-center min-h-[44px] text-xs font-mono text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
       >
-        {isPending ? "..." : "Sign Out"}
+        {isPending ? "…" : t("signOut")}
       </button>
     </div>
   );

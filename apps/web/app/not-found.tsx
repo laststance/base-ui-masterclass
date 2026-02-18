@@ -1,17 +1,36 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+import { headers } from "next/headers";
+
+export const metadata: Metadata = {
+  title: "404 – Page Not Found",
+  description: "The page you requested could not be found.",
+};
+
+const messages: Record<string, { notFound: string; goHome: string }> = {
+  ja: { notFound: "ページが見つかりません", goHome: "ホームへ" },
+  en: { notFound: "Page not found", goHome: "Go Home" },
+};
 
 /**
  * Root-level 404 page for routes outside the [locale] segment.
  * Provides its own <html>/<body> wrapper since the root layout
  * delegates HTML rendering to [locale]/layout.tsx.
+ * Derives best-effort locale from Accept-Language header.
+ *
+ * @returns {Promise<JSX.Element>} The 404 error page
  *
  * @example
  * // Triggered by: /fr/modules, /nonexistent, /de/
  * // NOT triggered by: /en/modules/99-invalid (handled by [locale] not-found)
  */
-export default function RootNotFound() {
+export default async function RootNotFound() {
+  const acceptLang = (await headers()).get("accept-language") ?? "en";
+  const lang = acceptLang.split(",")[0].split("-")[0] ?? "en";
+  const { notFound, goHome } = messages[lang] ?? messages["en"];
+
   return (
-    <html lang="en">
+    <html lang={lang}>
       <body
         style={{
           margin: 0,
@@ -42,10 +61,10 @@ export default function RootNotFound() {
               margin: "0 0 2rem",
             }}
           >
-            Page not found
+            {notFound}
           </p>
           <Link
-            href="/en"
+            href="/"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -60,7 +79,7 @@ export default function RootNotFound() {
               textDecoration: "none",
             }}
           >
-            Go Home
+            {goHome}
           </Link>
         </div>
       </body>
