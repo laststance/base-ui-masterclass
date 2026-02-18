@@ -3,7 +3,21 @@ import path from "node:path";
 import matter from "gray-matter";
 import { modules, type Locale, type ModuleConfig } from "../config";
 
-const MODULES_DIR = path.join(__dirname, "..", "modules");
+/**
+ * Resolves the modules directory path.
+ * Uses process.cwd() instead of __dirname because Next.js transpilePackages
+ * changes __dirname to the compiled output path inside .next/server/.
+ *
+ * @returns Absolute path to packages/content/modules
+ */
+const MODULES_DIR = path.join(
+  process.cwd(),
+  "..",
+  "..",
+  "packages",
+  "content",
+  "modules",
+);
 
 export interface LessonFrontmatter {
   title: string;
