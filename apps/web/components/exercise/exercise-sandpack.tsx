@@ -191,8 +191,8 @@ export function ExerciseSandpack({
   return (
     <div className="my-8 rounded-lg border border-accent/30 overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center justify-between bg-surface px-4 py-2 border-b border-border">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-surface px-4 py-2 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="h-2 w-2 rounded-full bg-accent" />
           <span className="text-xs font-mono text-text-muted">
             {exerciseId}
@@ -208,13 +208,13 @@ export function ExerciseSandpack({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
           {hints.length > 0 && (
             <button
               type="button"
               onClick={handleShowNextHint}
               disabled={hintIndex >= hints.length - 1}
-              className="text-xs px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors inline-flex items-center"
+              className="text-xs px-2 sm:px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors inline-flex items-center"
             >
               {t("hint")}{" "}
               ({Math.min(hintIndex + 2, hints.length)}/{hints.length})
@@ -223,14 +223,14 @@ export function ExerciseSandpack({
           <button
             type="button"
             onClick={handleToggleSolution}
-            className="text-xs px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors inline-flex items-center"
+            className="text-xs px-2 sm:px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors inline-flex items-center"
           >
             {showSolution ? t("myCode") : t("solution")}
           </button>
           <button
             type="button"
             onClick={handleReset}
-            className="text-xs px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors inline-flex items-center"
+            className="text-xs px-2 sm:px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors inline-flex items-center"
           >
             {t("reset")}
           </button>
