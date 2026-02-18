@@ -7,6 +7,7 @@ import { getUserProgress } from "@/lib/actions/progress";
 import {
   modules,
   getExercisesForModule,
+  getLessonsForModule,
   type Locale,
 } from "@base-ui-masterclass/content";
 
@@ -36,12 +37,14 @@ export default async function DashboardPage() {
   // Calculate per-module progress
   const moduleProgress = modules.map((mod) => {
     const exercises = getExercisesForModule(mod.slug);
+    const lessons = getLessonsForModule(mod.slug, locale);
     const total = exercises.length;
     const completed = exercises.filter((e) => completedIds.has(e.id)).length;
     return {
       ...mod,
       total,
       completed,
+      lessonCount: lessons.length,
       percentage: total > 0 ? Math.round((completed / total) * 100) : 0,
     };
   });
@@ -137,7 +140,13 @@ export default async function DashboardPage() {
                 )}
                 {mod.total === 0 && (
                   <p className="text-xs text-text-muted">
-                    {locale === "ja" ? "準備中" : "Coming soon"}
+                    {mod.lessonCount > 0
+                      ? locale === "ja"
+                        ? `${mod.lessonCount}レッスン（演習なし）`
+                        : `${mod.lessonCount} lessons (no exercises)`
+                      : locale === "ja"
+                        ? "準備中"
+                        : "Coming soon"}
                   </p>
                 )}
               </div>
