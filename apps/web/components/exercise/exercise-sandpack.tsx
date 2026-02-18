@@ -146,6 +146,7 @@ export function ExerciseSandpack({
   const [hintIndex, setHintIndex] = useState(-1);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [isCompleted, setIsCompleted] = useState(initialCompleted);
+  const [showCompletionToast, setShowCompletionToast] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const handleShowNextHint = useCallback(() => {
@@ -176,6 +177,8 @@ export function ExerciseSandpack({
         const result = await completeExercise(exerciseId);
         if (result.success) {
           setIsCompleted(true);
+          setShowCompletionToast(true);
+          setTimeout(() => setShowCompletionToast(false), 3000);
         } else {
           console.error("Failed to mark exercise complete:", result.error);
         }
@@ -339,6 +342,13 @@ export function ExerciseSandpack({
           <span className="text-xs text-success font-semibold">
             {t("solutionIndicator")}
           </span>
+        </div>
+      )}
+
+      {/* Completion toast */}
+      {showCompletionToast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-[fade-in-up_0.3s_ease-out] rounded-lg bg-success px-5 py-3 text-sm font-semibold text-background shadow-lg">
+          {t("completionToast")}
         </div>
       )}
     </div>

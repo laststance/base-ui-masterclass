@@ -42,7 +42,8 @@
     "markComplete": "完了にする",
     "completed": "完了済み",
     "completing": "保存中...",
-    "runningTests": "テスト実行中..."
+    "runningTests": "テスト実行中...",
+    "completionToast": "エクササイズ完了！お疲れ様でした。"
   },
   "nav": {
     "dashboard": "ダッシュボード",

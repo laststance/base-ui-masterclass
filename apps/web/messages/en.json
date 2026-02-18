@@ -42,7 +42,8 @@
     "markComplete": "Mark Complete",
     "completed": "Completed",
     "completing": "Saving...",
-    "runningTests": "Running tests..."
+    "runningTests": "Running tests...",
+    "completionToast": "Exercise completed! Great work."
   },
   "nav": {
     "dashboard": "Dashboard",
