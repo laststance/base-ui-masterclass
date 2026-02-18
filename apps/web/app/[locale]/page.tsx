@@ -60,7 +60,7 @@ export default async function HomePage() {
   const included = isJa
     ? [
         "全13モジュール・45以上のレッスン",
-        "35個のハンズオン演習",
+        `${totalComponents}個のハンズオン演習`,
         "Discordコミュニティへのアクセス",
         "ライフタイムアップデート",
         "英語 + 日本語対応",
@@ -68,7 +68,7 @@ export default async function HomePage() {
       ]
     : [
         "All 13 modules with 45+ lessons",
-        "35 hands-on coding exercises",
+        `${totalComponents} hands-on coding exercises`,
         "Private Discord community access",
         "Lifetime updates — every new component added",
         "Full course in English + Japanese",
