@@ -205,9 +205,7 @@ function Trigger({
       case "ArrowDown": {
         e.preventDefault();
         setIsOpen(true);
-        setHighlightedIndex(
-          e.key === "ArrowUp" ? options.current.length - 1 : 0,
-        );
+        setHighlightedIndex(0);
         break;
       }
       case "ArrowUp": {

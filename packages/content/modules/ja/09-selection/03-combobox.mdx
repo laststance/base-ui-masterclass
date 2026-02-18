@@ -366,12 +366,9 @@ function Option({
     registerOption(value, label, optionId);
   }, [value, label, optionId, registerOption]);
 
-  // このオプションがフィルターを通過するかチェック
-  if (inputValue && !label.toLowerCase().includes(inputValue.toLowerCase())) {
-    return null;
-  }
-
+  // filteredOptionsでフィルタリング済み — Rootのメモと一致するかチェック
   const index = filteredOptions.findIndex((o) => o.value === value);
+  if (index === -1) return null;
   const isSelected = selectedValue === value;
   const isHighlighted = highlightedIndex === index;
 

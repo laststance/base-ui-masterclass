@@ -38,7 +38,7 @@ WAI-ARIA仕様は、タブインターフェースに対して正確なロール
   <button role="tab" id="tab-1" aria-selected="true" aria-controls="panel-1">
     General
   </button>
-  <button role="tab" id="tab-2" aria-selected="false" aria-controls="panel-2" tabindex="-1">
+  <button role="tab" id="tab-2" aria-selected="false" aria-controls="panel-2" tabIndex={-1}>
     Security
   </button>
 </div>
@@ -104,6 +104,7 @@ interface TabsContextValue {
   activationMode: "automatic" | "manual";
   registerTab: (value: string, element: HTMLElement) => void;
   tabElements: React.RefObject<Map<string, HTMLElement>>;
+  baseId: string;
 }
 
 const TabsContext = React.createContext<TabsContextValue | null>(null);
@@ -129,6 +130,7 @@ function Root({
     controlledValue ?? defaultValue,
   );
   const tabElements = React.useRef(new Map<string, HTMLElement>());
+  const baseId = React.useId();
 
   const current = controlledValue ?? selectedValue;
 
@@ -155,8 +157,9 @@ function Root({
       activationMode,
       registerTab,
       tabElements,
+      baseId,
     }),
-    [current, selectTab, orientation, activationMode, registerTab],
+    [current, selectTab, orientation, activationMode, registerTab, baseId],
   );
 
   return (
@@ -201,11 +204,12 @@ function Tab({
     activationMode,
     registerTab,
     tabElements,
+    baseId,
   } = useTabsContext();
 
   const isSelected = selectedValue === value;
-  const tabId = `tab-${React.useId()}`;
-  const panelId = `panel-${React.useId()}`;
+  const tabId = `${baseId}-tab-${value}`;
+  const panelId = `${baseId}-panel-${value}`;
 
   const ref = React.useCallback(
     (el: HTMLElement | null) => {
@@ -277,14 +281,18 @@ function Panel({
   forceMount = false,
   ...props
 }: { value: string; forceMount?: boolean } & React.ComponentPropsWithoutRef<"div">) {
-  const { selectedValue } = useTabsContext();
+  const { selectedValue, baseId } = useTabsContext();
   const isSelected = selectedValue === value;
+  const panelId = `${baseId}-panel-${value}`;
+  const tabId = `${baseId}-tab-${value}`;
 
   if (!isSelected && !forceMount) return null;
 
   return (
     <div
       role="tabpanel"
+      id={panelId}
+      aria-labelledby={tabId}
       data-state={isSelected ? "active" : "inactive"}
       hidden={!isSelected}
       tabIndex={0}

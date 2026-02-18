@@ -117,6 +117,11 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+function snapToStep(value: number, min: number, step: number): number {
+  const steps = Math.round((value - min) / step);
+  return min + steps * step;
+}
+
 function Root({
   value: controlledValue,
   defaultValue = 0,
@@ -136,11 +141,12 @@ function Root({
 
   const updateValue = React.useCallback(
     (next: number) => {
-      const clamped = clamp(next, min, max);
+      const snapped = snapToStep(next, min, step);
+      const clamped = clamp(snapped, min, max);
       if (controlledValue === undefined) setInternalValue(clamped);
       onValueChange?.(clamped);
     },
-    [min, max, controlledValue, onValueChange],
+    [min, max, step, controlledValue, onValueChange],
   );
 
   const increment = React.useCallback(

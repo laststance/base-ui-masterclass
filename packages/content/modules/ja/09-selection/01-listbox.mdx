@@ -263,11 +263,11 @@ ARIA属性はCSSセレクターとして使用すべきではないため（値�
   outline: 2px solid var(--color-accent);
 }
 
-[role="option"][aria-selected="true"] {
+[role="option"][data-state="selected"] {
   font-weight: 600;
 }
 
-[role="option"][aria-selected="true"]::before {
+[role="option"][data-state="selected"]::before {
   content: "✓ ";
 }
 ```

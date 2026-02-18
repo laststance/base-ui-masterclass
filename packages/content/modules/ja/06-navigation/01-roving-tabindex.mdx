@@ -37,14 +37,14 @@ Roving Tabindexパターンはこれを単一のタブストップに削減し�
 
 ```tsx
 // 変更前：Button 2がアクティブ
-<button tabindex="-1">Button 1</button>
-<button tabindex="0">Button 2</button>  // ← タブ順序に含まれる
-<button tabindex="-1">Button 3</button>
+<button tabIndex={-1}>Button 1</button>
+<button tabIndex={0}>Button 2</button>  // ← タブ順序に含まれる
+<button tabIndex={-1}>Button 3</button>
 
 // ArrowRight押下後：Button 3がアクティブ
-<button tabindex="-1">Button 1</button>
-<button tabindex="-1">Button 2</button>
-<button tabindex="0">Button 3</button>  // ← ここに移動
+<button tabIndex={-1}>Button 1</button>
+<button tabIndex={-1}>Button 2</button>
+<button tabIndex={0}>Button 3</button>  // ← ここに移動
 ```
 
 ## 矢印キーナビゲーション

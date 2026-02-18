@@ -162,7 +162,7 @@ function Root({ children, ...props }: React.ComponentPropsWithoutRef<"span">) {
   const ctx = React.useMemo(() => ({ status, setStatus }), [status]);
 
   return (
-    <AvatarContext value={{ status }}>
+    <AvatarContext value={{ status, setStatus }}>
       <span data-state={status} {...props}>
         {children}
       </span>
@@ -175,8 +175,13 @@ function AvatarImage({
   alt = "",
   ...props
 }: React.ComponentPropsWithoutRef<"img">) {
-  const { status } = useAvatarContext();
+  const { setStatus } = useAvatarContext();
   const imageStatus = useImageLoadingStatus(src);
+
+  // コンテキストのstatusを同期してFallbackが正しく動作するようにする
+  React.useEffect(() => {
+    setStatus(imageStatus);
+  }, [imageStatus, setStatus]);
 
   // 画像が読み込まれた時のみレンダリング
   if (imageStatus !== "loaded") return null;
@@ -222,6 +227,7 @@ export const Avatar = { Root, Image: AvatarImage, Fallback };
  * getInitials("Ana Maria C") // => "AC"
  */
 function getInitials(name: string): string {
+  if (!name || !name.trim()) return "";
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0][0].toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();

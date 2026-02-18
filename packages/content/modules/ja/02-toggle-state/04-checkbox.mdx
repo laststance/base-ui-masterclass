@@ -97,7 +97,7 @@ export function Checkbox({
   );
 
   const element = render
-    ? React.cloneElement(render, elementProps)
+    ? React.cloneElement(render, elementProps, children)
     : <button {...elementProps}>{children}</button>;
 
   return (
@@ -194,6 +194,7 @@ function BubbleInput({
       ref={inputRef}
       type="checkbox"
       checked={checked === true}
+      onChange={() => {}} // Reactのcontrolled input警告を防止
       {...props}
       style={{
         position: "absolute",
