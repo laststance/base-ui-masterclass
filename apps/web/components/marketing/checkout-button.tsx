@@ -2,11 +2,16 @@
 
 import { cn } from "@/lib/utils";
 
+const CHECKOUT_URL = process.env.NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL ?? "#";
+
 /**
  * Lemon Squeezy checkout button.
  * Renders an anchor with the `lemonsqueezy-button` class so the
  * Lemon Squeezy embed script automatically intercepts clicks and
  * opens the overlay checkout modal.
+ *
+ * Requires `NEXT_PUBLIC_LEMONSQUEEZY_CHECKOUT_URL` env var in production.
+ * Falls back to `#` in development when unset.
  *
  * @param className - Additional Tailwind classes to merge
  * @param children - Button label (defaults to "Buy Now — $500")
@@ -27,7 +32,7 @@ export function CheckoutButton({
 }) {
   return (
     <a
-      href="https://base-ui-masterclass.lemonsqueezy.com/checkout/buy/xxxxxxxx"
+      href={CHECKOUT_URL}
       target="_blank"
       rel="noopener noreferrer"
       className={cn(
