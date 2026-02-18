@@ -214,7 +214,7 @@ export function ExerciseSandpack({
               type="button"
               onClick={handleShowNextHint}
               disabled={hintIndex >= hints.length - 1}
-              className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors"
+              className="text-xs px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors inline-flex items-center"
             >
               {t("hint")}{" "}
               ({Math.min(hintIndex + 2, hints.length)}/{hints.length})
@@ -223,14 +223,14 @@ export function ExerciseSandpack({
           <button
             type="button"
             onClick={handleToggleSolution}
-            className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors"
+            className="text-xs px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors inline-flex items-center"
           >
             {showSolution ? t("myCode") : t("solution")}
           </button>
           <button
             type="button"
             onClick={handleReset}
-            className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors"
+            className="text-xs px-3 py-1 min-h-[44px] rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors inline-flex items-center"
           >
             {t("reset")}
           </button>
