@@ -1,0 +1,247 @@
+---
+title: "Collapsibleコンポーネントの構築"
+description: "aria-expanded、aria-controls、そしてCSSグリッドトリックによるスムーズな高さアニメーションを使って、Collapsibleコンポーネントを構築する方法を学びます。"
+order: 1
+isFree: false
+---
+
+# Collapsibleコンポーネントの構築
+
+**Collapsible**コンポーネント（ディスクロージャーウィジェットとも呼ばれる）は、ユーザーがトリガーをクリックするとコンテンツセクションの表示/非表示を切り替えます。アコーディオン、展開可能なセクション、FAQリストの基本的な構成要素です。ここでアクセシビリティとアニメーションを正しく実装することで、それを基盤とするすべてのコンポーネントに恩恵をもたらします。
+
+## ディスクロージャー用のARIA属性
+
+WAI-ARIAオーサリングプラクティスは、ディスクロージャーウィジェットの明確なパターンを定義しています：
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `aria-expanded` | トリガーボタン | コンテンツが表示されている（`true`）か非表示（`false`）かを通知 |
+| `aria-controls` | トリガーボタン | 制御対象のコンテンツパネルの`id`を参照 |
+| `id` | コンテンツパネル | `aria-controls`のターゲット |
+
+スクリーンリーダーのユーザーがトリガーに遭遇すると、「詳細を切り替え、ボタン、折りたたみ」のように読み上げられます。クリック後は「展開」に更新されます。
+
+```tsx
+<button aria-expanded={open} aria-controls="panel-1">
+  Toggle Details
+</button>
+<div id="panel-1" role="region">
+  {/* コンテンツ */}
+</div>
+```
+
+## コンポーネントAPIの設計
+
+CollapsibleはCompound Componentパターンに従います：
+
+- **`Collapsible.Root`** — 開閉状態を管理し、contextを提供。
+- **`Collapsible.Trigger`** — 表示を切り替えるボタン。
+- **`Collapsible.Content`** — 表示/非表示されるパネル。
+
+```tsx
+interface CollapsibleProps {
+  open?: boolean;          // 制御モード
+  defaultOpen?: boolean;   // 非制御のデフォルト
+  onOpenChange?: (open: boolean) => void;
+}
+```
+
+制御（Controlled）と非制御（Uncontrolled）の両パターンをサポートすることで、さまざまなユースケースに対応できる柔軟なコンポーネントになります。
+
+## 制御と非制御の状態管理
+
+両方のモードをサポートするカスタムhookを使用します：
+
+```tsx
+function useControllableState<T>(
+  controlledValue: T | undefined,
+  defaultValue: T,
+  onChange?: (value: T) => void,
+): [T, (value: T) => void] {
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+  const isControlled = controlledValue !== undefined;
+  const value = isControlled ? controlledValue : internalValue;
+
+  const setValue = React.useCallback(
+    (next: T) => {
+      if (!isControlled) setInternalValue(next);
+      onChange?.(next);
+    },
+    [isControlled, onChange],
+  );
+
+  return [value, setValue];
+}
+```
+
+## CSSグリッドアニメーショントリック
+
+高さを`0`から`auto`にアニメーションさせることは、長年のCSSの課題でした。従来の`max-height`アプローチは最大値を推測する必要があり、不自然なイージングを生みます。**CSSグリッドトリック**はこれをエレガントに解決します：
+
+```css
+.collapsible-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms ease;
+}
+
+.collapsible-content[data-state="open"] {
+  grid-template-rows: 1fr;
+}
+
+.collapsible-content > div {
+  overflow: hidden;
+}
+```
+
+仕組みは以下の通りです：
+
+1. コンテンツパネルは単一行のCSSグリッドコンテナ。
+2. `grid-template-rows: 0fr`で行を高さゼロに折りたたむ。
+3. `grid-template-rows: 1fr`で行をコンテンツの高さに合わせて展開（`auto`と同等）。
+4. CSSトランジションが`0fr`と`1fr`の間をスムーズにアニメーション。
+5. 内側の`<div>`は`overflow: hidden`でトランジション中にコンテンツをクリッピング。
+
+このアプローチは**コンテンツの高さをJavaScriptで計測する必要がありません**。ブラウザが固有の高さを自動的に計算し、トランジションが残りを処理します。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+interface CollapsibleContextValue {
+  open: boolean;
+  toggle: () => void;
+  contentId: string;
+}
+
+const CollapsibleContext = React.createContext<CollapsibleContextValue | null>(null);
+
+function useCollapsibleContext() {
+  const ctx = React.useContext(CollapsibleContext);
+  if (!ctx) throw new Error("Collapsible sub-components must be used within Collapsible.Root");
+  return ctx;
+}
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+  ...props
+}: CollapsibleProps & React.ComponentPropsWithoutRef<"div">) {
+  const [open, setOpen] = useControllableState(controlledOpen, defaultOpen, onOpenChange);
+  const contentId = React.useId();
+  const toggle = React.useCallback(() => setOpen(!open), [open, setOpen]);
+
+  const ctx = React.useMemo(
+    () => ({ open, toggle, contentId }),
+    [open, toggle, contentId],
+  );
+
+  return (
+    <CollapsibleContext value={ctx}>
+      <div data-state={open ? "open" : "closed"} {...props}>
+        {children}
+      </div>
+    </CollapsibleContext>
+  );
+}
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { open, toggle, contentId } = useCollapsibleContext();
+
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={contentId}
+      data-state={open ? "open" : "closed"}
+      onClick={toggle}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, contentId } = useCollapsibleContext();
+
+  return (
+    <div
+      id={contentId}
+      role="region"
+      data-state={open ? "open" : "closed"}
+      hidden={!open}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export const Collapsible = { Root, Trigger, Content };
+```
+
+## グリッドトリックを使ったアニメーション
+
+CSSグリッドアニメーションを使用するには、Contentコンポーネントを少し変更する必要があります。`hidden`属性（アニメーションしない）を使用する代わりに、要素をDOMに残したままCSSで表示を制御します：
+
+```tsx
+function AnimatedContent({
+  children,
+  forceMount = false,
+  ...props
+}: { forceMount?: boolean } & React.ComponentPropsWithoutRef<"div">) {
+  const { open, contentId } = useCollapsibleContext();
+
+  return (
+    <div
+      id={contentId}
+      role="region"
+      data-state={open ? "open" : "closed"}
+      style={{
+        display: "grid",
+        gridTemplateRows: open ? "1fr" : "0fr",
+        transition: "grid-template-rows 300ms ease",
+      }}
+      {...props}
+    >
+      <div style={{ overflow: "hidden" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+## キーボード操作
+
+トリガーは`<button>`なので、キーボード操作は自動的に提供されます：
+
+| キー | アクション |
+|------|-----------|
+| `Enter` | Collapsibleの切り替え |
+| `Space` | Collapsibleの切り替え |
+
+ネイティブの`<button>`要素を使用しているため、追加のキーボードハンドリングは不要です。
+
+## 重要なポイント
+
+1. **`aria-expanded`**をトリガーに設定し、スクリーンリーダーに現在の状態を通知する。
+2. **`aria-controls`**でトリガーをコンテンツパネルのIDにリンクする。
+3. **`useControllableState`**で制御と非制御の両方の使用パターンをサポート。
+4. **CSSグリッドトリック**（`grid-template-rows: 0fr`から`1fr`）で、JavaScript計測なしに高さを`auto`にアニメーション。
+5. **data属性**（`data-state="open"` / `"closed"`）で純粋なCSSスタイリングとトランジションを実現。
+6. **ネイティブの`<button>`**がキーボードサポートを自動的に提供。
+
+## 実践してみよう
+
+<Exercise id="collapsible-basic" />

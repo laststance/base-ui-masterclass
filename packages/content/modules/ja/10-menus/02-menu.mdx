@@ -1,0 +1,566 @@
+---
+title: "Menuコンポーネントの構築"
+description: "トリガー、キーボードナビゲーション、サブメニュー、ネストされたフォーカス管理を備えたアクセシブルなドロップダウンMenuコンポーネントを構築します。"
+order: 2
+isFree: false
+---
+
+# Menuコンポーネントの構築
+
+**Menu**コンポーネントは、アクション可能な項目のドロップダウンパネルを開くトリガーボタンを提供します。Select（値を選択する）とは異なり、Menuはコマンドを実行します — 「コピー」「削除」「共有」「PDFとしてエクスポート」。このレッスンでは、キーボードナビゲーション、サブメニューサポート、適切なフォーカス管理を備えた完全なMenuを構築します。
+
+## ARIA構造
+
+| 要素 | ロール/属性 | 目的 |
+|---------|----------------|---------|
+| トリガーボタン | `aria-haspopup="menu"` | メニューが表示されることを通知 |
+| トリガーボタン | `aria-expanded` | メニューが開いているかどうか |
+| トリガーボタン | `aria-controls` | メニューの `id` を指す |
+| メニューコンテナ | `role="menu"` | メニューウィジェットとして識別 |
+| 各アクション | `role="menuitem"` | アクティベート可能なコマンド |
+| サブメニュートリガー | `aria-haspopup="menu"` | この項目がサブメニューを開く |
+| サブメニュートリガー | `aria-expanded` | サブメニューが開いているかどうか |
+
+```tsx
+<button
+  aria-haspopup="menu"
+  aria-expanded={isOpen}
+  aria-controls="actions-menu"
+>
+  Actions
+</button>
+<ul role="menu" id="actions-menu">
+  <li role="menuitem">Copy</li>
+  <li role="menuitem">Paste</li>
+  <li role="separator" />
+  <li role="menuitem" aria-haspopup="menu" aria-expanded="false">
+    Share ▶
+  </li>
+</ul>
+```
+
+## コンポーネントAPI設計
+
+```tsx
+interface MenuProps {
+  children: React.ReactNode;
+}
+
+interface MenuItemProps {
+  onSelect?: () => void;
+  disabled?: boolean;
+}
+
+interface SubMenuProps {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}
+```
+
+複合コンポーネント：
+
+- **`Menu.Root`** — 開閉状態を管理し、コンテキストを提供します。
+- **`Menu.Trigger`** — メニューを開くボタン。
+- **`Menu.Content`** — `role="menu"` を持つポップアップメニューコンテナ。
+- **`Menu.Item`** — 個々のアクション可能なメニュー項目。
+- **`Menu.Separator`** — グループ間の視覚的な仕切り。
+- **`Menu.Sub`** — ネストされたメニューのサブメニューラッパー。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface MenuContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  activeIndex: number;
+  setActiveIndex: (index: number) => void;
+  items: React.RefObject<HTMLElement[]>;
+  registerItem: (el: HTMLElement) => void;
+  unregisterItem: (el: HTMLElement) => void;
+  menuId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  closeMenu: () => void;
+}
+
+const MenuContext = React.createContext<MenuContextValue | null>(null);
+
+function useMenuContext() {
+  const ctx = React.useContext(MenuContext);
+  if (!ctx) throw new Error("Menu components must be used within Menu.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({ children }: MenuProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const items = React.useRef<HTMLElement[]>([]);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const menuId = `menu-${React.useId()}`;
+
+  const registerItem = React.useCallback((el: HTMLElement) => {
+    if (!items.current.includes(el)) {
+      items.current.push(el);
+    }
+  }, []);
+
+  const unregisterItem = React.useCallback((el: HTMLElement) => {
+    items.current = items.current.filter((item) => item !== el);
+  }, []);
+
+  const closeMenu = React.useCallback(() => {
+    setIsOpen(false);
+    setActiveIndex(0);
+    triggerRef.current?.focus();
+  }, []);
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      activeIndex,
+      setActiveIndex,
+      items,
+      registerItem,
+      unregisterItem,
+      menuId,
+      triggerRef,
+      closeMenu,
+    }),
+    [isOpen, activeIndex, registerItem, unregisterItem, menuId, closeMenu],
+  );
+
+  return <MenuContext value={ctx}>{children}</MenuContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { isOpen, setIsOpen, setActiveIndex, items, menuId, triggerRef } =
+    useMenuContext();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "ArrowDown":
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        setIsOpen(true);
+        setActiveIndex(0);
+        // レンダー後に最初のメニュー項目にフォーカス
+        requestAnimationFrame(() => {
+          items.current[0]?.focus();
+        });
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        setIsOpen(true);
+        const lastIndex = items.current.length - 1;
+        setActiveIndex(lastIndex);
+        requestAnimationFrame(() => {
+          items.current[lastIndex]?.focus();
+        });
+        break;
+      }
+    }
+  };
+
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      aria-haspopup="menu"
+      aria-expanded={isOpen}
+      aria-controls={menuId}
+      onClick={() => {
+        if (isOpen) {
+          setIsOpen(false);
+        } else {
+          setIsOpen(true);
+          setActiveIndex(0);
+          requestAnimationFrame(() => {
+            items.current[0]?.focus();
+          });
+        }
+      }}
+      onKeyDown={handleKeyDown}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const { isOpen, setIsOpen, activeIndex, setActiveIndex, items, menuId, closeMenu } =
+    useMenuContext();
+
+  // タイプアヘッド
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  // 外側クリック
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const menu = document.getElementById(menuId);
+      if (menu?.contains(e.target as Node)) return;
+      closeMenu();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen, menuId, closeMenu]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const count = items.current.length;
+    if (count === 0) return;
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (activeIndex + 1) % count;
+        setActiveIndex(next);
+        items.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (activeIndex - 1 + count) % count;
+        setActiveIndex(prev);
+        items.current[prev]?.focus();
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setActiveIndex(0);
+        items.current[0]?.focus();
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        const last = count - 1;
+        setActiveIndex(last);
+        items.current[last]?.focus();
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      case "Tab": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      default: {
+        // タイプアヘッド
+        if (e.key.length === 1) {
+          clearTimeout(timeoutRef.current);
+          bufferRef.current += e.key.toLowerCase();
+
+          const matchIndex = items.current.findIndex((el) =>
+            el.textContent?.toLowerCase().startsWith(bufferRef.current),
+          );
+          if (matchIndex !== -1) {
+            setActiveIndex(matchIndex);
+            items.current[matchIndex]?.focus();
+          }
+
+          timeoutRef.current = setTimeout(() => {
+            bufferRef.current = "";
+          }, 500);
+        }
+      }
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <ul role="menu" id={menuId} onKeyDown={handleKeyDown} {...props}>
+      {children}
+    </ul>
+  );
+}
+
+// --- Item ---
+
+function Item({
+  onSelect,
+  disabled = false,
+  children,
+  ...props
+}: MenuItemProps & React.ComponentPropsWithoutRef<"li">) {
+  const { registerItem, unregisterItem, closeMenu, setActiveIndex, items } =
+    useMenuContext();
+
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) {
+        registerItem(el);
+      } else if (el === null) {
+        // クリーンアップはunregisterItemで処理
+      }
+    },
+    [registerItem],
+  );
+
+  const handleClick = () => {
+    if (disabled) return;
+    onSelect?.();
+    closeMenu();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  const index = items.current.findIndex(
+    (el) => el === document.activeElement,
+  );
+
+  return (
+    <li
+      ref={ref}
+      role="menuitem"
+      tabIndex={-1}
+      aria-disabled={disabled || undefined}
+      data-disabled={disabled || undefined}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        const idx = items.current.indexOf(
+          document.activeElement as HTMLElement,
+        );
+        if (idx !== -1) setActiveIndex(idx);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+// --- Separator ---
+
+function Separator(props: React.ComponentPropsWithoutRef<"li">) {
+  return <li role="separator" {...props} />;
+}
+
+export const Menu = { Root, Trigger, Content, Item, Separator };
+```
+
+## フォーカス管理の詳細
+
+MenuとSelectの決定的な違いは、DOMフォーカスがどこにあるかです：
+
+| コンポーネント | フォーカスの場所 | 理由 |
+|-----------|---------------|-----|
+| Select | トリガーボタン（常に） | `aria-activedescendant` が仮想フォーカスを処理 |
+| Menu | メニュー項目（開いているとき） | 項目が直接アクティベートされるため実際のDOMフォーカスを受け取る |
+
+メニューが開くと、フォーカスは最初のメニュー項目に移動します。メニューが閉じると、フォーカスはトリガーボタンに戻ります。このフォーカス復元は、キーボードユーザーがページ内の位置を維持するために不可欠です。
+
+```tsx
+// 開く時：最初の項目にフォーカスを移動
+setIsOpen(true);
+requestAnimationFrame(() => {
+  items.current[0]?.focus();
+});
+
+// 閉じる時：トリガーにフォーカスを復元
+setIsOpen(false);
+triggerRef.current?.focus();
+```
+
+<Callout type="warning">
+メニュー項目を開く際にフォーカスするときは `requestAnimationFrame` を使用してください。メニューのDOMは `.focus()` を呼び出す前にレンダリングされている必要があります。フレーム遅延なしでは、要素がまだ存在しない可能性があります。
+</Callout>
+
+## サブメニューの構築
+
+サブメニューは複雑さを一段階追加します。`aria-haspopup="menu"` を持つメニュー項目は、アクティベートされるか `ArrowRight` が押されるとサブメニューを開くことを示します。
+
+```tsx
+function SubMenu({
+  label,
+  children,
+}: SubMenuProps) {
+  const [isSubOpen, setIsSubOpen] = React.useState(false);
+  const subItems = React.useRef<HTMLElement[]>([]);
+  const subMenuId = `submenu-${React.useId()}`;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsSubOpen(true);
+      requestAnimationFrame(() => {
+        subItems.current[0]?.focus();
+      });
+    }
+  };
+
+  const handleSubKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft" || e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsSubOpen(false);
+      // フォーカスはサブメニュートリガー項目に戻る
+    }
+  };
+
+  return (
+    <li
+      role="menuitem"
+      aria-haspopup="menu"
+      aria-expanded={isSubOpen}
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+    >
+      {label}
+      {isSubOpen && (
+        <ul
+          role="menu"
+          id={subMenuId}
+          onKeyDown={handleSubKeyDown}
+        >
+          {children}
+        </ul>
+      )}
+    </li>
+  );
+}
+```
+
+### サブメニューの配置
+
+サブメニューは通常、親項目の右側に表示されます。LTRレイアウトの場合：
+
+```css
+.submenu-item {
+  position: relative;
+}
+
+.submenu-content {
+  position: absolute;
+  left: 100%;
+  top: 0;
+}
+```
+
+### ネストされたメニューのフォーカスフロー
+
+```
+Trigger → [開く] → Menu
+  Item 1
+  Item 2 (サブメニューあり) → [ArrowRight] → Submenu
+    Sub-item 1
+    Sub-item 2
+    [ArrowLeft] → Item 2に戻る
+  Item 3
+  [Escape] → メニューを閉じる → Triggerに戻る
+```
+
+<Callout type="info">
+`Escape` は最も内側の開いているメニューのみを閉じるべきです。サブメニューが開いている場合、`Escape` はサブメニューを閉じますが親メニューは開いたままにします。トップレベルのメニューが `Escape` を受け取った場合のみ、メニューシステム全体が閉じます。
+</Callout>
+
+## ポインター操作の処理
+
+メニューはサブメニュー開閉のためにポインターホバーにも応答すべきです：
+
+```tsx
+const hoverTimeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+const handlePointerEnter = () => {
+  clearTimeout(hoverTimeoutRef.current);
+  hoverTimeoutRef.current = setTimeout(() => {
+    setIsSubOpen(true);
+  }, 150); // 小さな遅延で意図しない開閉を防止
+};
+
+const handlePointerLeave = () => {
+  clearTimeout(hoverTimeoutRef.current);
+  hoverTimeoutRef.current = setTimeout(() => {
+    setIsSubOpen(false);
+  }, 300);
+};
+```
+
+開く際の遅延（150ms）は、ユーザーがメニュー項目を斜めに横切る際のサブメニューのちらつきを防ぎます。閉じる際のより長い遅延（300ms）は、ユーザーが親項目からサブメニューに移動する時間を確保し、閉じてしまうのを防ぎます。
+
+## メニューのスタイリング
+
+```css
+[role="menu"] {
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+[role="menuitem"] {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.4;
+  min-height: 36px;
+}
+
+[role="menuitem"]:focus-visible {
+  outline: none;
+  background: var(--color-accent-subtle);
+}
+
+[role="menuitem"][data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+[role="separator"] {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-border);
+}
+```
+
+## 重要なポイント
+
+1. **Menu = トリガー + `role="menu"` のポップアップ。** 項目は実際のDOMフォーカスを受け取ります。
+2. **フォーカスは開くとメニュー内に移動**し、**閉じるとトリガーに戻ります**。
+3. **矢印キーは最初と最後の項目でラップ**します。
+4. **`ArrowRight` でサブメニューを開き**、`ArrowLeft` で閉じます — OS動作に一致。
+5. **`Escape` は最も内側の**開いているメニューレベルのみを閉じます。
+6. **タイプアヘッド**により、ユーザーは文字を入力して項目にジャンプできます。
+7. **ポインターホバー**はちらつきを防ぐための小さな遅延でサブメニューを開きます。
+8. **`requestAnimationFrame`** はメニューレンダリング後に項目にフォーカスする際に必要です。
+
+## 実践してみよう
+
+<Exercise id="menu-basic" />

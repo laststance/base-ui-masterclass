@@ -1,0 +1,300 @@
+---
+title: "Listboxパターン"
+description: "オプション選択、タイプアヘッド検索、マルチセレクトを含むWAI-ARIA Listboxパターンをマスターします — SelectとComboboxコンポーネントの基礎です。"
+order: 1
+isFree: false
+---
+
+# Listboxパターン
+
+**Listbox**はユーザーが選択できるオプションのリストを表示する基本的なARIAウィジェットです。ネイティブの`<select>`要素とは異なり、カスタムListboxはスクリーンリーダーやキーボードユーザーが依存するアクセシビリティ契約を維持しながら、スタイリングと動作を完全に制御できます。このレッスンでは、SelectとComboboxコンポーネントを構築する前に必要なARIA role、キーボードインタラクション、実装戦略を解説します。
+
+## ARIA Roleと属性
+
+WAI-ARIA仕様はListboxコンテナとそのオプション間の正確な関係を定義しています：
+
+| 要素 | Role | 目的 |
+|------|------|------|
+| コンテナ | `listbox` | 選択可能なオプションをグループ化 |
+| 各オプション | `option` | Listbox内の選択可能なアイテム |
+
+### 必須属性
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `role="listbox"` | コンテナ | Listboxウィジェットとして識別 |
+| `role="option"` | 各アイテム | 選択可能なオプションとして識別 |
+| `aria-selected="true"` | 選択されたオプション | 選択状態を読み上げ |
+| `aria-label`または`aria-labelledby` | Listbox | アクセシブルな名前を提供 |
+| `aria-multiselectable` | Listbox | 複数選択が可能であることを示す |
+| `aria-activedescendant` | Listbox | 現在フォーカスされているオプションの`id`を指す |
+
+```tsx
+<ul role="listbox" aria-label="Favorite fruit" aria-activedescendant="option-banana">
+  <li role="option" id="option-apple" aria-selected="false">Apple</li>
+  <li role="option" id="option-banana" aria-selected="true">Banana</li>
+  <li role="option" id="option-cherry" aria-selected="false">Cherry</li>
+</ul>
+```
+
+スクリーンリーダーがこの構造に遭遇すると、「Banana、選択済み、3件中2件目」と読み上げます — ユーザーに完全な空間認識を提供します。
+
+## フォーカス管理：2つの戦略
+
+Listbox内のフォーカス管理には2つのアプローチがあります：
+
+### 戦略1: ロービングtabindex
+
+各オプションが`tabindex="0"`（アクティブ）または`tabindex="-1"`（非アクティブ）を受け取ります。矢印キーが実際のDOMフォーカスをオプション間で移動します。
+
+```tsx
+<li role="option" tabIndex={isActive ? 0 : -1}>Apple</li>
+```
+
+**利点:** シンプルなメンタルモデル、スクリーンリーダーとデフォルトで動作。
+**欠点:** DOMフォーカスが移動するため、長いリストでスクロールジャンプが発生する可能性。
+
+### 戦略2: aria-activedescendant
+
+Listboxコンテナ自体がDOMフォーカスを保持します。`aria-activedescendant`属性がスクリーンリーダーにどのオプションが「仮想的に」フォーカスされているかを伝えます。
+
+```tsx
+<ul role="listbox" tabIndex={0} aria-activedescendant={activeOptionId}>
+  <li role="option" id="option-1" data-highlighted={isHighlighted}>Apple</li>
+</ul>
+```
+
+**利点:** DOMフォーカスの移動なし、ポップアップ（Select、Combobox）でフォーカスをトリガーや入力に留める必要がある場合に最適。
+**欠点:** 実装がやや複雑、すべてのオプションにユニークな`id`が必要。
+
+<Callout type="tip">
+Listboxがポップアップ内（Select、Combobox）に表示される場合は`aria-activedescendant`を使用してください。Listboxがページ上に常に表示されている場合はロービングtabindexを使用してください。
+</Callout>
+
+## キーボードナビゲーション
+
+WAI-ARIA Listboxパターンでは以下のキーボードインタラクションが必要です：
+
+| キー | 単一選択 | 複数選択 |
+|------|---------|---------|
+| `ArrowDown` | 次のオプションにハイライト移動 | 次のオプションにハイライト移動 |
+| `ArrowUp` | 前のオプションにハイライト移動 | 前のオプションにハイライト移動 |
+| `Home` | 最初のオプションにハイライト移動 | 最初のオプションにハイライト移動 |
+| `End` | 最後のオプションにハイライト移動 | 最後のオプションにハイライト移動 |
+| `Enter` / `Space` | ハイライトされたオプションを選択 | ハイライトされたオプションの選択をトグル |
+| `Shift + ArrowDown` | — | 選択を下に拡張 |
+| `Shift + ArrowUp` | — | 選択を上に拡張 |
+| `Ctrl + A` | — | すべてのオプションを選択 |
+
+### ラッピングとクランプ
+
+タブとは異なり、WAI-ARIA Listbox仕様ではラッピングは**必須ではありません**。ユーザーが最後のオプションで`ArrowDown`を押しても何も起きません。最初のオプションで`ArrowUp`を押しても何も起きません。これはタブリストの動作とは異なり、正しく実装することが重要です。
+
+## タイプアヘッド検索
+
+タイプアヘッド（「type-to-select」とも呼ばれる）は、ユーザーがオプションのラベルの最初の数文字を入力して素早くナビゲートできる機能です。Listboxの最も重要なユーザビリティ機能の1つです：
+
+```
+ユーザーが入力: "b" → "Banana"をハイライト
+ユーザーが入力: "ba" → まだ"Banana"
+ユーザーが入力: "bl" → "Blueberry"をハイライト
+```
+
+### 実装戦略
+
+1. 入力された文字をバッファ文字列に蓄積。
+2. タイムアウト後（通常500ms）バッファをクリア。
+3. 各キーストロークで、テキストコンテンツがバッファ文字列で始まるオプションを検索（大文字小文字を区別しない）。
+4. 最初の一致をハイライト。
+
+```tsx
+function useTypeahead(options: string[], onMatch: (index: number) => void) {
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const handleTypeahead = React.useCallback(
+    (key: string) => {
+      // 印刷可能な単一文字のみ処理
+      if (key.length !== 1) return;
+
+      clearTimeout(timeoutRef.current);
+      bufferRef.current += key.toLowerCase();
+
+      const matchIndex = options.findIndex((opt) =>
+        opt.toLowerCase().startsWith(bufferRef.current),
+      );
+
+      if (matchIndex !== -1) {
+        onMatch(matchIndex);
+      }
+
+      timeoutRef.current = setTimeout(() => {
+        bufferRef.current = "";
+      }, 500);
+    },
+    [options, onMatch],
+  );
+
+  return handleTypeahead;
+}
+```
+
+<Callout type="warning">
+タイプアヘッドに`onKeyPress`を使用しないでください — 非推奨です。`onKeyDown`を使用し、`key.length === 1`をチェックして印刷可能な単一文字をフィルタリングしてください。
+</Callout>
+
+## 単一選択Listbox
+
+単一選択Listboxでは、一度に1つのオプションのみ選択できます。新しいオプションを選択すると、前のオプションが自動的に選択解除されます。
+
+```tsx
+function Listbox({ options, value, onChange, label }: SingleSelectListboxProps) {
+  const [highlightedIndex, setHighlightedIndex] = React.useState(
+    Math.max(0, options.findIndex((o) => o.value === value)),
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        setHighlightedIndex((i) => Math.min(i + 1, options.length - 1));
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        setHighlightedIndex((i) => Math.max(i - 1, 0));
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setHighlightedIndex(0);
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        setHighlightedIndex(options.length - 1);
+        break;
+      }
+      case "Enter":
+      case " ": {
+        e.preventDefault();
+        onChange(options[highlightedIndex].value);
+        break;
+      }
+    }
+  };
+
+  const activeDescendantId = `option-${options[highlightedIndex].value}`;
+
+  return (
+    <ul
+      role="listbox"
+      aria-label={label}
+      aria-activedescendant={activeDescendantId}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+    >
+      {options.map((option, index) => (
+        <li
+          key={option.value}
+          role="option"
+          id={`option-${option.value}`}
+          aria-selected={option.value === value}
+          data-highlighted={index === highlightedIndex}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## 複数選択Listbox
+
+複数選択Listboxはコンテナに`aria-multiselectable="true"`を使用します。各オプションは選択済みと未選択を独立してトグルします。
+
+```tsx
+<ul role="listbox" aria-label="Toppings" aria-multiselectable="true">
+  <li role="option" aria-selected="true">Cheese</li>
+  <li role="option" aria-selected="false">Pepperoni</li>
+  <li role="option" aria-selected="true">Mushrooms</li>
+</ul>
+```
+
+### 選択のインタラクション
+
+| 操作 | 動作 |
+|------|------|
+| オプションで`Space` / `Enter` | そのオプションの選択をトグル |
+| `Shift + ArrowDown` | ハイライトを移動して選択に追加 |
+| `Shift + ArrowUp` | ハイライトを移動して選択に追加 |
+| `Ctrl + A` | すべてのオプションを選択 |
+| クリック | そのオプションのみを選択（他は選択解除） |
+| `Ctrl + クリック` | 他に影響を与えずそのオプションをトグル |
+| `Shift + クリック` | 最後に選択されたものからクリックしたものまでの範囲を選択 |
+
+### 複数選択の状態管理
+
+```tsx
+const [selectedValues, setSelectedValues] = React.useState<Set<string>>(new Set());
+
+const toggleSelection = (value: string) => {
+  setSelectedValues((prev) => {
+    const next = new Set(prev);
+    if (next.has(value)) {
+      next.delete(value);
+    } else {
+      next.add(value);
+    }
+    return next;
+  });
+};
+```
+
+## ハイライトと選択状態のスタイリング
+
+ARIA属性はCSSセレクターとして使用すべきではないため（値が実装によって変わる可能性がある）、`data-*`属性を使用します：
+
+```css
+[role="option"][data-highlighted="true"] {
+  background: var(--color-accent-subtle);
+  outline: 2px solid var(--color-accent);
+}
+
+[role="option"][aria-selected="true"] {
+  font-weight: 600;
+}
+
+[role="option"][aria-selected="true"]::before {
+  content: "✓ ";
+}
+```
+
+<Callout type="info">
+「ハイライト」（視覚的にフォーカスされている）と「選択」（選ばれた値）の区別は重要です。ユーザーはオプションAが選択されたままオプションBをハイライトできます。これらは2つの独立した状態です。
+</Callout>
+
+## ビューへのスクロール
+
+Listboxに表示されるオプション数より多くのオプションがある場合、オプションをハイライトするとビューポート内にスクロールすべきです：
+
+```tsx
+React.useEffect(() => {
+  const option = document.getElementById(activeDescendantId);
+  option?.scrollIntoView({ block: "nearest" });
+}, [activeDescendantId]);
+```
+
+オプションが部分的に見えているときの不快なスクロールジャンプを避けるため、`block: "center"`ではなく`block: "nearest"`を使用してください。
+
+## 重要なポイント
+
+1. **`role="listbox"` + `role="option"`**はスクリーンリーダーが選択状態を読み上げるために必要なセマンティック構造を作成します。
+2. **`aria-activedescendant`**はポップアップListbox（Select、Combobox）に適しています。フォーカスがトリガー要素に留まるためです。
+3. **タイプアヘッド検索**により入力でオプションにジャンプできます — 500msのバッファタイムアウトを使用します。
+4. **単一選択**は前のオプションを自動的に選択解除します。**複数選択**は`aria-multiselectable="true"`とトグルセマンティクスを使用します。
+5. **ハイライトと選択**は2つの独立した状態です — 混同しないでください。
+6. **ラッピングなし** — タブとは異なり、Listboxナビゲーションは最初と最後のオプションでクランプします。
+7. **`scrollIntoView({ block: "nearest" })`**はハイライトされたオプションを不快なジャンプなしに表示し続けます。

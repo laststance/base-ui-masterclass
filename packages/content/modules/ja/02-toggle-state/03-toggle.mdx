@@ -1,0 +1,246 @@
+---
+title: "ToggleとToggleGroupの構築"
+description: "aria-pressedを使ったToggleボタンと、React Contextで排他的または複数選択を管理するToggleGroupを構築します。"
+order: 3
+isFree: false
+---
+
+# ToggleとToggleGroupの構築
+
+ToggleはSwitchに似ていますが、セマンティクスが異なります。Switchは設定のオン/オフを表しますが、Toggleはテキストエディタの太字、斜体、配置ボタンのような**押された/押されていない**ボタンのステートを表します。
+
+ToggleGroupはこれをさらに発展させ、単一選択または複数選択のトグル**グループ**を管理し、ライブラリで初めてReact Contextを導入します。
+
+## Toggle vs. Switch
+
+| 観点 | Switch | Toggle |
+|------|--------|--------|
+| ARIAロール | `role="switch"` | ネイティブbutton |
+| ステート属性 | `aria-checked` | `aria-pressed` |
+| セマンティックな意味 | 設定のオン/オフ | アクションのアクティブ/非アクティブ |
+| 典型的なUI | 設定パネル | ツールバーボタン |
+
+## パート1: Toggleコンポーネント
+
+### ステップ1: Propsの定義
+
+```tsx
+import * as React from "react";
+import { useControllableState } from "./use-controllable-state";
+
+interface ToggleProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  /** 制御されたpressedステート */
+  pressed?: boolean;
+  /** 非制御モードの初期pressedステート */
+  defaultPressed?: boolean;
+  /** pressedステートが変更されたときに呼ばれるコールバック */
+  onPressedChange?: (pressed: boolean) => void;
+  /** ToggleGroupで使用される値の識別子 */
+  value?: string;
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+### ステップ2: 実装
+
+```tsx
+export function Toggle({
+  pressed: controlledPressed,
+  defaultPressed = false,
+  onPressedChange,
+  disabled,
+  value,
+  render,
+  ref,
+  ...props
+}: ToggleProps) {
+  // ToggleGroup内にいるか確認
+  const group = React.useContext(ToggleGroupContext);
+
+  // グループ内の場合、ステートをグループに委譲
+  const isInGroup = group !== null && value !== undefined;
+  const groupPressed = isInGroup ? group.isSelected(value) : undefined;
+
+  const [pressed, setPressed] = useControllableState({
+    value: isInGroup ? groupPressed : controlledPressed,
+    defaultValue: defaultPressed,
+    onChange: (next) => {
+      if (isInGroup && value !== undefined) {
+        group.toggle(value);
+      }
+      onPressedChange?.(next);
+    },
+  });
+
+  const handleClick = () => {
+    if (!disabled) {
+      setPressed(!pressed);
+    }
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    disabled,
+    type: "button" as const,
+    "aria-pressed": pressed,
+    onClick: handleClick,
+    "data-pressed": pressed || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+## パート2: ToggleGroup
+
+ToggleGroupはどのトグルが選択されているかを管理する必要があります。2つのモードをサポートしています：
+
+| モード | 振る舞い | 値の型 |
+|--------|---------|--------|
+| `"single"` | 一度に1つのトグルのみ押せる | `string` |
+| `"multiple"` | 任意の数を押せる | `string[]` |
+
+### ステップ1: Contextの定義
+
+```tsx
+interface ToggleGroupContextValue {
+  isSelected: (value: string) => boolean;
+  toggle: (value: string) => void;
+}
+
+const ToggleGroupContext = React.createContext<ToggleGroupContextValue | null>(null);
+```
+
+### ステップ2: ToggleGroupコンポーネントの構築
+
+```tsx
+interface ToggleGroupProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** 選択モード */
+  type: "single" | "multiple";
+  /** 制御値 */
+  value?: string | string[];
+  /** 非制御モードの初期値 */
+  defaultValue?: string | string[];
+  /** 選択が変更されたときのコールバック */
+  onValueChange?: (value: string | string[]) => void;
+  /** グループ内のすべてのトグルを無効化 */
+  disabled?: boolean;
+  ref?: React.Ref<HTMLDivElement>;
+}
+
+export function ToggleGroup({
+  type,
+  value: controlledValue,
+  defaultValue = type === "single" ? "" : [],
+  onValueChange,
+  disabled,
+  children,
+  ref,
+  ...props
+}: ToggleGroupProps) {
+  const [value, setValue] = useControllableState({
+    value: controlledValue,
+    defaultValue,
+    onChange: onValueChange,
+  });
+
+  const contextValue = React.useMemo<ToggleGroupContextValue>(() => ({
+    isSelected: (itemValue: string) => {
+      if (type === "single") {
+        return value === itemValue;
+      }
+      return Array.isArray(value) && value.includes(itemValue);
+    },
+    toggle: (itemValue: string) => {
+      if (type === "single") {
+        // singleモードでは、選択済みならトグルオフ、そうでなければ選択
+        setValue(value === itemValue ? "" : itemValue);
+      } else {
+        // multipleモードでは、配列に追加または削除
+        const current = Array.isArray(value) ? value : [];
+        const next = current.includes(itemValue)
+          ? current.filter((v) => v !== itemValue)
+          : [...current, itemValue];
+        setValue(next);
+      }
+    },
+  }), [type, value, setValue]);
+
+  return (
+    <ToggleGroupContext value={contextValue}>
+      <div
+        ref={ref}
+        role="group"
+        {...props}
+        data-disabled={disabled || undefined}
+      >
+        {children}
+      </div>
+    </ToggleGroupContext>
+  );
+}
+```
+
+注意: React 19のcontext providerシンタックス`<ToggleGroupContext value={...}>`を使用しています。古い`<ToggleGroupContext.Provider value={...}>`ではありません。
+
+## 使用例
+
+### スタンドアロンToggle
+
+```tsx
+<Toggle defaultPressed={false}>
+  <BoldIcon />
+</Toggle>
+```
+
+### 単一選択グループ
+
+```tsx
+<ToggleGroup type="single" defaultValue="left">
+  <Toggle value="left"><AlignLeftIcon /></Toggle>
+  <Toggle value="center"><AlignCenterIcon /></Toggle>
+  <Toggle value="right"><AlignRightIcon /></Toggle>
+</ToggleGroup>
+```
+
+### 複数選択グループ
+
+```tsx
+<ToggleGroup type="multiple" defaultValue={["bold"]}>
+  <Toggle value="bold"><BoldIcon /></Toggle>
+  <Toggle value="italic"><ItalicIcon /></Toggle>
+  <Toggle value="underline"><UnderlineIcon /></Toggle>
+</ToggleGroup>
+```
+
+## スタイリング
+
+```css
+.toggle[data-pressed] {
+  background: var(--color-primary-100);
+  color: var(--color-primary-700);
+}
+
+.toggle-group[data-disabled] .toggle {
+  opacity: 0.5;
+  pointer-events: none;
+}
+```
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| `aria-pressed` | トグルの押された/押されていない状態を伝達 |
+| React Context | 子コンポーネントとグループステートを共有 |
+| 単一 vs. 複数 | 同じAPIで異なる選択戦略 |
+| 複合コンポーネント | 親（ToggleGroup）と子（Toggle）がcontext経由で通信 |
+
+これはコースで初めての複合コンポーネントパターンです。Tabs、Accordion、Menu、そしてほぼすべての複雑なコンポーネントで再登場します。

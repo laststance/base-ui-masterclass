@@ -1,0 +1,571 @@
+---
+title: "AlertDialogコンポーネントの構築"
+description: "背景幕クリックでの閉じる動作を防止し、明示的なユーザーアクションを要求し、role=alertdialogを使用するAlertDialogの構築方法を学びます。"
+order: 3
+isFree: false
+---
+
+# AlertDialogコンポーネントの構築
+
+**AlertDialog**は重要な確認と破壊的なアクションに特化したダイアログです。標準的なダイアログとは異なり、アラートダイアログは**気軽に閉じることができません** — ユーザーは明示的にアクション（確認またはキャンセル）を選択する必要があります。これにより、不意な背景幕クリックや意図しないEscape押下による偶発的なデータ損失を防ぎます。
+
+## AlertDialogとDialogの違い
+
+| 動作 | Dialog | AlertDialog |
+|------|--------|-------------|
+| ARIA role | `role="dialog"` | `role="alertdialog"` |
+| 背景幕クリックで閉じる | はい | **いいえ** |
+| Escapeキーで閉じる | はい | **いいえ**（またはキャンセルとして閉じる） |
+| ユーザーがアクションを選択する必要 | いいえ — 自由に閉じられる | **はい** — ボタンをクリックする必要がある |
+| 典型的な使用場面 | フォーム、設定、情報表示 | 削除確認、データ損失の警告 |
+
+`alertdialog` roleはスクリーンリーダーに、このダイアログが即座の応答を要求していることを伝えます。スクリーンリーダーは標準のダイアログよりも緊急性の高いトーンや動作で読み上げる場合があります。
+
+## AlertDialogを使うべきとき
+
+| AlertDialogを使う | 通常のDialogを使う |
+|------------------|-------------------|
+| 「このファイルを削除しますか？」（不可逆） | 「プロフィールを編集」（閉じられるフォーム） |
+| 「未保存の変更は失われます」 | 「共有設定」（情報表示） |
+| 「このページから離れますか？」 | 「日付を選択」（ピッカーUI） |
+| 「この操作はすべてのユーザーに影響します」 | 「詳細を表示」（読み取り専用コンテンツ） |
+
+<Callout type="warning">
+AlertDialogを多用しないでください。すべての確認にアラートダイアログを使用すると、ユーザーは疲労して内容を読まずにクリックするようになります。本当に破壊的または不可逆なアクションにのみ使用してください。
+</Callout>
+
+## ARIAセマンティクス
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `role="alertdialog"` | Dialogコンテナ | アクションを要求するアラートダイアログとして識別 |
+| `aria-modal="true"` | Dialogコンテナ | スクリーンリーダーの仮想カーソルを限定 |
+| `aria-labelledby` | Dialogコンテナ | アラートのタイトルを指す |
+| `aria-describedby` | Dialogコンテナ | アラートの説明を指す |
+
+```tsx
+<div
+  role="alertdialog"
+  aria-modal="true"
+  aria-labelledby="alert-title"
+  aria-describedby="alert-desc"
+>
+  <h2 id="alert-title">Delete Project</h2>
+  <p id="alert-desc">
+    This will permanently delete the project and all its data.
+    This action cannot be undone.
+  </p>
+  <button>Cancel</button>
+  <button>Delete</button>
+</div>
+```
+
+<Callout type="info">
+`alertdialog` roleは`dialog`を継承しています — すべて同じセマンティクス（モーダル動作、ラベリング）に加え、支援技術に緊急性を知らせる「アラート」セマンティクスが追加されています。
+</Callout>
+
+## Dialogとの主要な設計上の違い
+
+### 1. 背景幕での閉じる動作なし
+
+Overlayのクリックハンドラーは削除されます。背景幕をクリックしても何も起きません：
+
+```tsx
+// Dialog: overlayクリックで閉じる
+<div onClick={() => setOpen(false)} aria-hidden="true" />
+
+// AlertDialog: overlayクリックでは閉じない
+<div aria-hidden="true" /> // onClickハンドラーなし
+```
+
+### 2. Escapeキーの動作
+
+アラートダイアログにおけるEscapeには2つの有効なアプローチがあります：
+
+| アプローチ | 動作 | 使用場面 |
+|----------|------|---------|
+| **無効化** | Escapeは何もしない | 最大限の保護（デフォルト） |
+| **キャンセル** | Escapeがキャンセルアクションをトリガー | 明確なキャンセルボタンがある場合 |
+
+最大限の安全性のため、デフォルト実装ではEscapeを完全に無効化します：
+
+```tsx
+// Dialog: Escapeで閉じる
+if (e.key === "Escape") setOpen(false);
+
+// AlertDialog: Escapeは何もしない（またはキャンセルを明示的にトリガー）
+if (e.key === "Escape") {
+  e.preventDefault();
+  // オプション: onCancel?.();
+}
+```
+
+### 3. 安全なアクションへの初期フォーカス
+
+アラートダイアログでは、初期フォーカスは**最も破壊的でないアクション** — 通常は「キャンセル」ボタンに設定すべきです：
+
+```tsx
+// AlertDialogのコンテンツ内で、キャンセルボタンをマーク：
+<button data-autofocus>Cancel</button>
+<button className="destructive">Delete</button>
+```
+
+これにより、ダイアログが開いた直後にEnterを押して誤って破壊的なアクションを確認してしまうことを防ぎます。
+
+## コンポーネントAPI設計
+
+```tsx
+interface AlertDialogProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+```
+
+コンパウンドコンポーネント（Dialogと同じ構造）：
+
+- **`AlertDialog.Root`** — 開閉状態を管理。
+- **`AlertDialog.Trigger`** — アラートダイアログを開くボタン。
+- **`AlertDialog.Portal`** — 子要素をPortalにレンダリング。
+- **`AlertDialog.Overlay`** — 閉じることができない背景幕。
+- **`AlertDialog.Content`** — フォーカストラップを持つアラートダイアログパネル。
+- **`AlertDialog.Title`** — アラートの見出し。
+- **`AlertDialog.Description`** — アラートの説明。
+- **`AlertDialog.Cancel`** — キャンセルするボタン（アクションなしで閉じる）。
+- **`AlertDialog.Action`** — 破壊的なアクションを確認するボタン。
+
+## 完全な実装
+
+AlertDialogは実装の大部分をDialogと共有しています。主要な違いをハイライトします：
+
+```tsx
+import * as React from "react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface AlertDialogContextValue {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  titleId: string;
+  descriptionId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}
+
+const AlertDialogContext =
+  React.createContext<AlertDialogContextValue | null>(null);
+
+function useAlertDialogContext() {
+  const ctx = React.useContext(AlertDialogContext);
+  if (!ctx)
+    throw new Error(
+      "AlertDialog components must be used within AlertDialog.Root",
+    );
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  children,
+}: AlertDialogProps & { children: React.ReactNode }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
+  const titleId = React.useId();
+  const descriptionId = React.useId();
+
+  const setOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [controlledOpen, onOpenChange],
+  );
+
+  const ctx = React.useMemo(
+    () => ({ open, setOpen, titleId, descriptionId, triggerRef, contentRef }),
+    [open, setOpen, titleId, descriptionId],
+  );
+
+  return (
+    <AlertDialogContext value={ctx}>{children}</AlertDialogContext>
+  );
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen, triggerRef } = useAlertDialogContext();
+
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      onClick={() => setOpen(true)}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Portal ---
+
+function Portal({ children }: { children: React.ReactNode }) {
+  const { open } = useAlertDialogContext();
+  if (!open) return null;
+  return createPortal(
+    <div data-portal="">{children}</div>,
+    document.body,
+  );
+}
+
+// --- Overlay (閉じることができない) ---
+
+function Overlay({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  // 主要な違い: onClickハンドラーなし
+  return (
+    <div
+      className={className}
+      data-alert-dialog-overlay=""
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, titleId, descriptionId, triggerRef, contentRef } =
+    useAlertDialogContext();
+
+  const getFocusableElements = () => {
+    if (!contentRef.current) return [];
+    return Array.from(
+      contentRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+  };
+
+  const handleSentinelFocus = (position: "start" | "end") => {
+    const focusable = getFocusableElements();
+    if (focusable.length === 0) return;
+    if (position === "start") {
+      focusable[focusable.length - 1].focus();
+    } else {
+      focusable[0].focus();
+    }
+  };
+
+  // 初期フォーカス — data-autofocusを優先（キャンセルボタンであるべき）
+  React.useEffect(() => {
+    if (!open || !contentRef.current) return;
+
+    const autoFocusTarget =
+      contentRef.current.querySelector<HTMLElement>("[data-autofocus]");
+    if (autoFocusTarget) {
+      autoFocusTarget.focus();
+      return;
+    }
+
+    const focusable = getFocusableElements();
+    if (focusable.length > 0) {
+      focusable[0].focus();
+    } else {
+      contentRef.current.focus();
+    }
+  }, [open]);
+
+  // 主要な違い: Escapeはアラートダイアログを閉じない
+  React.useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault(); // Escapeでの閉じる動作をブロック
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
+  // スクロールロック
+  React.useEffect(() => {
+    if (!open) return;
+    const scrollY = window.scrollY;
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.position = "";
+      document.body.style.top = "";
+      document.body.style.width = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [open]);
+
+  // 兄弟要素をinertに
+  React.useEffect(() => {
+    if (!open) return;
+    const portal = contentRef.current?.closest("[data-portal]");
+    const siblings = Array.from(document.body.children).filter(
+      (el) => el !== portal,
+    );
+    siblings.forEach((el) => el.setAttribute("inert", ""));
+    return () => siblings.forEach((el) => el.removeAttribute("inert"));
+  }, [open]);
+
+  // 閉じるときにフォーカスを戻す
+  React.useEffect(() => {
+    if (!open) {
+      triggerRef.current?.focus();
+    }
+  }, [open, triggerRef]);
+
+  return (
+    <>
+      <div
+        tabIndex={0}
+        onFocus={() => handleSentinelFocus("start")}
+        aria-hidden="true"
+        style={{ position: "fixed", opacity: 0, pointerEvents: "none" }}
+      />
+      <div
+        ref={contentRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        className={className}
+        {...props}
+      >
+        {children}
+      </div>
+      <div
+        tabIndex={0}
+        onFocus={() => handleSentinelFocus("end")}
+        aria-hidden="true"
+        style={{ position: "fixed", opacity: 0, pointerEvents: "none" }}
+      />
+    </>
+  );
+}
+
+// --- Title ---
+
+function Title({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"h2">) {
+  const { titleId } = useAlertDialogContext();
+  return (
+    <h2 id={titleId} {...props}>
+      {children}
+    </h2>
+  );
+}
+
+// --- Description ---
+
+function Description({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"p">) {
+  const { descriptionId } = useAlertDialogContext();
+  return (
+    <p id={descriptionId} {...props}>
+      {children}
+    </p>
+  );
+}
+
+// --- Cancel ---
+
+function Cancel({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen } = useAlertDialogContext();
+  return (
+    <button type="button" onClick={() => setOpen(false)} {...props}>
+      {children}
+    </button>
+  );
+}
+
+// --- Action ---
+
+function Action({
+  children,
+  onClick,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { setOpen } = useAlertDialogContext();
+
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    onClick?.(e);
+    setOpen(false);
+  };
+
+  return (
+    <button type="button" onClick={handleClick} {...props}>
+      {children}
+    </button>
+  );
+}
+
+export const AlertDialog = {
+  Root,
+  Trigger,
+  Portal,
+  Overlay,
+  Content,
+  Title,
+  Description,
+  Cancel,
+  Action,
+};
+```
+
+## 3つの主要な違いのまとめ
+
+実装を見ると、アラートダイアログは標準ダイアログと正確に3箇所が異なります：
+
+```tsx
+// 1. Role
+role="alertdialog"      // role="dialog"の代わりに
+
+// 2. Overlay
+<div aria-hidden />     // onClickなし（onClick={close}の代わりに）
+
+// 3. Escapeキー
+e.preventDefault();     // Escapeをブロック（閉じる代わりに）
+```
+
+それ以外のすべて — フォーカストラップ、センチネル、inert、スクロールロック、Portal、フォーカスリターン — は同一です。これは意図的です。アラートダイアログはダイアログの**動作バリアント**であり、根本的に異なるコンポーネントではありません。
+
+## 使用例
+
+```tsx
+function DeleteProjectAlert() {
+  const [open, setOpen] = React.useState(false);
+
+  const handleDelete = () => {
+    deleteProject(projectId);
+    // setOpen(false)はActionによって自動的に呼ばれる
+  };
+
+  return (
+    <AlertDialog.Root open={open} onOpenChange={setOpen}>
+      <AlertDialog.Trigger>Delete Project</AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="alert-overlay" />
+        <AlertDialog.Content className="alert-content">
+          <AlertDialog.Title>Delete Project</AlertDialog.Title>
+          <AlertDialog.Description>
+            This will permanently delete "{projectName}" and all
+            associated data. This action cannot be undone.
+          </AlertDialog.Description>
+          <div className="alert-actions">
+            <AlertDialog.Cancel data-autofocus>
+              Cancel
+            </AlertDialog.Cancel>
+            <AlertDialog.Action onClick={handleDelete}>
+              Delete Forever
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+```
+
+## コンポジション：DialogとAlertDialogでコードを共有
+
+実際のコンポーネントライブラリでは、共有ロジックをベースコンポーネントまたは共有hooksに抽出します：
+
+```tsx
+// 共有hooks
+function useDialogState(props) { /* open/close状態管理 */ }
+function useFocusTrap(open, contentRef) { /* センチネル + inert */ }
+function useScrollLock(open) { /* bodyスクロール防止 */ }
+function useReturnFocus(open, triggerRef) { /* フォーカス復元 */ }
+
+// Dialogはすべての共有hooksを使用 + Escape許可 + 背景幕閉じる許可
+// AlertDialogはすべての共有hooksを使用 + Escapeブロック + 背景幕ブロック
+```
+
+これにより、動作の違いを明示的にしながらコードベースをDRYに保てます。
+
+## CSSの戦略
+
+アラートダイアログは重要度を伝えるために視覚的な手がかりをよく使用します：
+
+```css
+.alert-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-surface);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+  max-width: 400px;
+  width: calc(100% - 32px);
+  z-index: 51;
+}
+
+.alert-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+/* 破壊的アクションのボタン */
+.alert-actions button:last-child {
+  background: var(--color-destructive);
+  color: var(--color-destructive-foreground);
+}
+```
+
+<Callout type="tip">
+破壊的なアクションボタンは最後（LTRレイアウトでは右端）に配置してください。これはmacOSやWindowsのプラットフォーム規約に従います。プライマリ/破壊的アクションが右側、安全なアクション（キャンセル）が左側です。
+</Callout>
+
+## 重要なポイント
+
+1. **`role="alertdialog"`**は支援技術に緊急性と必須の応答を伝えます。
+2. **背景幕での閉じる動作なし** — Overlayをクリックしても何も起きません。
+3. **Escapeはブロック** — ユーザーは明示的にアクションを選択する必要があります。
+4. **安全なアクション（キャンセル）への初期フォーカス**は偶発的な確認を防ぎます。
+5. **`Cancel`と`Action`**はセマンティックなボタンです — Cancelは副作用なしで閉じ、Actionは操作を実行してから閉じます。
+6. **共有インフラ** — フォーカストラップ、スクロールロック、Portal、フォーカスリターンはDialogと同一です。
+7. **控えめに使用** — 本当に破壊的または不可逆なアクションにのみ使用してください。
+
+## 自分で試してみよう
+
+<Exercise id="alert-dialog-basic" />

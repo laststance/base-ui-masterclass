@@ -1,0 +1,295 @@
+---
+title: "NumberFieldコンポーネントの構築"
+description: "インクリメント/デクリメントボタン、キーボード矢印キー、min/max/step制約、role='spinbutton'セマンティクスを備えたアクセシブルなNumberFieldの構築方法を学びます。"
+order: 1
+isFree: false
+---
+
+# NumberFieldコンポーネントの構築
+
+**NumberField**は、直接入力するかインクリメント/デクリメントボタンを使って数値を入力するためのコンポーネントです。ネイティブの `<input type="number">` は存在しますが、ブラウザ間でスタイリングや動作が大きく異なります。ヘッドレスなNumberFieldを使えば、適切なアクセシビリティセマンティクスを維持しながらUXを完全に制御できます。
+
+## なぜ `<input type="number">` ではないのか？
+
+ネイティブのnumber inputにはいくつかの問題点があります：
+
+- **スピナーUIの不一致**：Chromeはフィールド内に小さな上下矢印を表示し、Firefoxはホバー時に表示し、Safariは完全に非表示にします。
+- **カスタムボタン配置不可**：インクリメント/デクリメントボタンを入力フィールドの外に配置できません。
+- **スクロールハイジャック**：一部のブラウザでは、フォーカスされたnumber inputの上でスクロールすると値が変更される予期しない動作があります。
+- **バリデーションの癖**：数値以外の文字は一部のブラウザでは暗黙的に無視されますが、他のブラウザではそうではありません。
+
+ヘッドレスアプローチにより、スクリーンリーダーとの互換性を維持する `spinbutton` ARIAロールを使用しながら、正確なインタラクションモデルを定義できます。
+
+## ARIA Spinbuttonパターン
+
+WAI-ARIA仕様は、ステッピング動作を持つ数値入力に対して `spinbutton` ロールを定義しています：
+
+| 属性 | 目的 | 例 |
+|-----------|---------|---------|
+| `role="spinbutton"` | 数値ステッパーとして識別 | inputに適用 |
+| `aria-valuenow` | 現在の数値 | `42` |
+| `aria-valuemin` | 許容される最小値 | `0` |
+| `aria-valuemax` | 許容される最大値 | `100` |
+| `aria-valuetext` | 人間が読める代替テキスト | `"42 items"` |
+| `aria-label` | アクセシブル名 | `"Quantity"` |
+
+スクリーンリーダーは「数量、スピンボタン、42、最小0、最大100」と読み上げます。
+
+## キーボード操作
+
+| キー | アクション |
+|-----|--------|
+| `ArrowUp` | stepずつインクリメント |
+| `ArrowDown` | stepずつデクリメント |
+| `Home` | 最小値に設定 |
+| `End` | 最大値に設定 |
+| `Page Up` | 大きなステップ（10倍）でインクリメント |
+| `Page Down` | 大きなステップ（10倍）でデクリメント |
+
+これらのキーボードショートカットはARIA spinbuttonパターンで定義されており、支援技術のユーザーに期待されています。
+
+## コンポーネントAPI設計
+
+```tsx
+interface NumberFieldProps {
+  value?: number;
+  defaultValue?: number;
+  onValueChange?: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  disabled?: boolean;
+}
+```
+
+複合コンポーネント：
+
+- **`NumberField.Root`** — 数値ステートを管理し、コンテキストを提供します。
+- **`NumberField.Input`** — 現在の値を表示・受け付けるテキスト入力。
+- **`NumberField.Increment`** — 1ステップ分値を増やすボタン。
+- **`NumberField.Decrement`** — 1ステップ分値を減らすボタン。
+
+## クランプとステップロジック
+
+NumberFieldのコアロジックは、値を範囲内にクランプし、ステップ刻みにスナップすることです：
+
+```tsx
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function snapToStep(value: number, min: number, step: number): number {
+  const steps = Math.round((value - min) / step);
+  return min + steps * step;
+}
+```
+
+<Callout type="warning">
+浮動小数点演算には精度の問題が生じる可能性があります。例えば、`0.1 + 0.2` は `0.30000000000000004` になります。小数のステップを扱う場合は、ステップの精度に基づく固定小数点桁数に丸めることを検討してください。
+</Callout>
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+interface NumberFieldContextValue {
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  disabled: boolean;
+  increment: () => void;
+  decrement: () => void;
+  setValue: (v: number) => void;
+  inputId: string;
+}
+
+const NumberFieldContext = React.createContext<NumberFieldContextValue | null>(null);
+
+function useNumberFieldContext() {
+  const ctx = React.useContext(NumberFieldContext);
+  if (!ctx) throw new Error("NumberField sub-components must be used within NumberField.Root");
+  return ctx;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function Root({
+  value: controlledValue,
+  defaultValue = 0,
+  onValueChange,
+  min = -Infinity,
+  max = Infinity,
+  step = 1,
+  disabled = false,
+  children,
+  ...props
+}: NumberFieldProps & React.ComponentPropsWithoutRef<"div">) {
+  const [internalValue, setInternalValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const value = controlledValue ?? internalValue;
+  const inputId = React.useId();
+
+  const updateValue = React.useCallback(
+    (next: number) => {
+      const clamped = clamp(next, min, max);
+      if (controlledValue === undefined) setInternalValue(clamped);
+      onValueChange?.(clamped);
+    },
+    [min, max, controlledValue, onValueChange],
+  );
+
+  const increment = React.useCallback(
+    () => updateValue(value + step),
+    [value, step, updateValue],
+  );
+
+  const decrement = React.useCallback(
+    () => updateValue(value - step),
+    [value, step, updateValue],
+  );
+
+  const ctx = React.useMemo(
+    () => ({ value, min, max, step, disabled, increment, decrement, setValue: updateValue, inputId }),
+    [value, min, max, step, disabled, increment, decrement, updateValue, inputId],
+  );
+
+  return (
+    <NumberFieldContext value={ctx}>
+      <div role="group" data-disabled={disabled || undefined} {...props}>
+        {children}
+      </div>
+    </NumberFieldContext>
+  );
+}
+
+function Input(props: React.ComponentPropsWithoutRef<"input">) {
+  const { value, min, max, step, disabled, increment, decrement, setValue, inputId } =
+    useNumberFieldContext();
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    switch (e.key) {
+      case "ArrowUp":
+        e.preventDefault();
+        increment();
+        break;
+      case "ArrowDown":
+        e.preventDefault();
+        decrement();
+        break;
+      case "Home":
+        e.preventDefault();
+        if (min !== -Infinity) setValue(min);
+        break;
+      case "End":
+        e.preventDefault();
+        if (max !== Infinity) setValue(max);
+        break;
+      case "PageUp":
+        e.preventDefault();
+        setValue(value + step * 10);
+        break;
+      case "PageDown":
+        e.preventDefault();
+        setValue(value - step * 10);
+        break;
+    }
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const parsed = parseFloat(e.target.value);
+    if (!Number.isNaN(parsed)) setValue(parsed);
+  };
+
+  return (
+    <input
+      id={inputId}
+      role="spinbutton"
+      type="text"
+      inputMode="numeric"
+      aria-valuenow={value}
+      aria-valuemin={min !== -Infinity ? min : undefined}
+      aria-valuemax={max !== Infinity ? max : undefined}
+      value={value}
+      disabled={disabled}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      {...props}
+    />
+  );
+}
+
+function Increment(props: React.ComponentPropsWithoutRef<"button">) {
+  const { increment, disabled, value, max } = useNumberFieldContext();
+  const atMax = value >= max;
+
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label="Increment"
+      disabled={disabled || atMax}
+      onClick={increment}
+      {...props}
+    />
+  );
+}
+
+function Decrement(props: React.ComponentPropsWithoutRef<"button">) {
+  const { decrement, disabled, value, min } = useNumberFieldContext();
+  const atMin = value <= min;
+
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label="Decrement"
+      disabled={disabled || atMin}
+      onClick={decrement}
+      {...props}
+    />
+  );
+}
+
+export const NumberField = { Root, Input, Increment, Decrement };
+```
+
+## なぜボタンに `tabIndex={-1}` なのか？
+
+インクリメントとデクリメントボタンは `tabIndex={-1}` を使用します。なぜなら、`spinbutton` input自体が `ArrowUp` と `ArrowDown` でキーボード操作を処理するためです。inputが既にステッピングをサポートしているので、ユーザーは別々のボタンにタブ移動する必要がありません。ボタンはマウスやタッチユーザーの視覚的な利便性として存在します。
+
+<Callout type="tip">
+ボタンを独立してキーボードアクセス可能にしたい場合（明示的なボタンクリックを好むユーザーのため）は、`tabIndex={-1}` を削除してください。どちらのアプローチも有効です。ARIA仕様ではこれを実装の選択に委ねています。
+</Callout>
+
+## なぜ `type="text"` と `inputMode="numeric"` なのか？
+
+ブラウザ組み込みのスピナーとバリデーション動作を避けるため、`type="number"` の代わりに `type="text"` を使用しています。`inputMode="numeric"` 属性はモバイルデバイスに数値キーボードを表示するよう指示し、完全なスタイリング制御と適切なモバイル入力の両方を実現します。
+
+## スタイリング用データ属性
+
+プロジェクトの慣例に従い、CSSのみの条件付きスタイリングのために `data-disabled` を公開します：
+
+```css
+[data-disabled] .number-field-input {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+## 重要なポイント
+
+1. **`role="spinbutton"`** を `aria-valuenow`、`aria-valuemin`、`aria-valuemax` と共に使用し、適切なスクリーンリーダー読み上げを実現します。
+2. **矢印キーで値をステップ**させ、Home/Endでmin/maxにジャンプします。
+3. **値をクランプ**して、すべての更新でmin/max範囲内に収め、無効な状態を防ぎます。
+4. **`type="text"` と `inputMode="numeric"`** を使用して、ネイティブnumber inputの癖を回避しつつモバイルキーボードを適切に保ちます。
+5. **ステッパーボタンに `tabIndex={-1}`** を設定します。input自体がキーボードステッピングを処理するためです。
+6. **境界でボタンを無効化**（最大値でインクリメント、最小値でデクリメント）し、これ以上ステッピングできないことを示します。
+
+## 実践してみよう
+
+<Exercise id="number-field-basic" />

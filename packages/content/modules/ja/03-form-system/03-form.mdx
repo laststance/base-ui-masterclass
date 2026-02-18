@@ -1,0 +1,328 @@
+---
+title: "Formコンポーネントの構築"
+description: "送信処理、エラー収集、HTML Constraint Validation APIとの統合を行うヘッドレスFormコンポーネントを構築します。"
+order: 3
+isFree: false
+---
+
+# Formコンポーネントの構築
+
+Formコンポーネントはすべてを結びつけます。ネイティブの`<form>`要素をラップし、送信をインターセプトしてバリデーションを実行し、すべてのフィールドからエラーを収集し、利用者にエラー表示と送信フローの完全な制御を提供します。
+
+## Formコンポーネントの役割
+
+| 責務 | 方法 |
+|------|------|
+| デフォルト送信の防止 | カスタムハンドリング時に`e.preventDefault()` |
+| 制約バリデーションの実行 | すべてのフォームコントロールで`checkValidity()`を呼び出す |
+| エラーメッセージの収集 | 無効な要素から`validationMessage`を読み取る |
+| エラーの報告 | エラーマップを利用者に渡す |
+| 非同期バリデーションのサポート | 利用者の`onSubmit`ハンドラをawait |
+| ステートのリセット | 送信成功またはリセット時にエラーをクリア |
+
+## ステップ1: エラーマップの定義
+
+```tsx
+/**
+ * フィールド名をバリデーションエラーメッセージにマッピングします。
+ *
+ * @example
+ * {
+ *   email: "Please enter a valid email address",
+ *   password: "Password must be at least 8 characters"
+ * }
+ */
+type FormErrors = Record<string, string>;
+```
+
+## ステップ2: Propsの定義
+
+```tsx
+import * as React from "react";
+
+interface FormProps extends Omit<React.ComponentPropsWithoutRef<"form">, "onSubmit" | "onError"> {
+  /**
+   * フォームが送信され、すべてのフィールドが有効な場合に呼ばれます。
+   * FormDataオブジェクトを受け取ります。
+   * 非同期にできます -- Formはpendingステートを追跡します。
+   */
+  onSubmit?: (data: FormData) => void | Promise<void>;
+  /**
+   * バリデーションが失敗した場合に呼ばれます。
+   * フィールド名からエラーメッセージへのマップを受け取ります。
+   */
+  onError?: (errors: FormErrors) => void;
+  /**
+   * クライアントサイドバリデーションとマージするサーバーサイドエラー。
+   */
+  errors?: FormErrors;
+  ref?: React.Ref<HTMLFormElement>;
+}
+```
+
+## ステップ3: Formの実装
+
+```tsx
+export function Form({
+  onSubmit,
+  onError,
+  errors: serverErrors,
+  children,
+  ref,
+  ...props
+}: FormProps) {
+  const [errors, setErrors] = React.useState<FormErrors>({});
+  const [isPending, setIsPending] = React.useState(false);
+
+  // クライアントとサーバーのエラーをマージ
+  const mergedErrors = React.useMemo(
+    () => ({ ...errors, ...serverErrors }),
+    [errors, serverErrors],
+  );
+
+  const collectErrors = (form: HTMLFormElement): FormErrors => {
+    const errorMap: FormErrors = {};
+    const elements = form.elements;
+
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLInputElement;
+
+      // バリデーション対象の名前付き要素のみチェック
+      if (element.name && !element.validity.valid) {
+        errorMap[element.name] = element.validationMessage;
+      }
+    }
+
+    return errorMap;
+  };
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+
+    // ブラウザの制約バリデーションを実行
+    const isValid = form.checkValidity();
+
+    if (!isValid) {
+      const collectedErrors = collectErrors(form);
+      setErrors(collectedErrors);
+      onError?.(collectedErrors);
+      return;
+    }
+
+    // 前回のエラーをクリア
+    setErrors({});
+
+    if (onSubmit) {
+      const formData = new FormData(form);
+
+      try {
+        setIsPending(true);
+        await onSubmit(formData);
+      } catch (error) {
+        // onSubmitがthrowした場合、サーバーエラーとして扱う
+        if (error instanceof Error) {
+          setErrors({ form: error.message });
+          onError?.({ form: error.message });
+        }
+      } finally {
+        setIsPending(false);
+      }
+    }
+  };
+
+  const handleReset = () => {
+    setErrors({});
+  };
+
+  // context経由で子にフォームステートを提供
+  const contextValue = React.useMemo(
+    () => ({ errors: mergedErrors, isPending }),
+    [mergedErrors, isPending],
+  );
+
+  return (
+    <FormContext value={contextValue}>
+      <form
+        ref={ref}
+        {...props}
+        noValidate
+        onSubmit={handleSubmit}
+        onReset={handleReset}
+        data-pending={isPending || undefined}
+      >
+        {children}
+      </form>
+    </FormContext>
+  );
+}
+```
+
+### 主な設計判断
+
+| 判断 | 理由 |
+|------|------|
+| `noValidate` | ブラウザネイティブのエラーツールチップを防止。エラー表示は自前で制御 |
+| `e.preventDefault()` | 常にネイティブ送信を防止。フローは自前で制御 |
+| `FormData` | 標準API。Next.jsのServer Actionsでも動作 |
+| 非同期`onSubmit` | 実際のフォームではAPI呼び出しのawaitが必要 |
+| `data-pending` | JavaScriptのクラス切り替えなしでCSSがローディング状態を表示可能 |
+
+## ステップ4: Form Context
+
+```tsx
+interface FormContextValue {
+  errors: FormErrors;
+  isPending: boolean;
+}
+
+const FormContext = React.createContext<FormContextValue>({
+  errors: {},
+  isPending: false,
+});
+
+/**
+ * 任意の子コンポーネントからフォームレベルのエラーとpendingステートにアクセスします。
+ *
+ * @returns エラーマップとpendingブーリアンを含むフォームcontext
+ *
+ * @example
+ * function SubmitButton() {
+ *   const { isPending } = useFormContext();
+ *   return <button disabled={isPending}>Submit</button>;
+ * }
+ */
+export function useFormContext() {
+  return React.useContext(FormContext);
+}
+```
+
+## ステップ5: FormErrorコンポーネント
+
+フォームレベルのエラーを表示するコンパニオンコンポーネントです：
+
+```tsx
+interface FormErrorProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** エラーを表示するフィールド名。省略するとフォームレベルのエラー */
+  name?: string;
+  ref?: React.Ref<HTMLDivElement>;
+}
+
+function FormError({ name = "form", children, ref, ...props }: FormErrorProps) {
+  const { errors } = useFormContext();
+  const error = errors[name];
+
+  if (!error && !children) {
+    return null;
+  }
+
+  return (
+    <div ref={ref} role="alert" {...props}>
+      {children ?? error}
+    </div>
+  );
+}
+```
+
+## 使用例
+
+### 基本的なフォーム
+
+```tsx
+<Form
+  onSubmit={async (data) => {
+    const email = data.get("email");
+    const password = data.get("password");
+    await login(email, password);
+  }}
+  onError={(errors) => {
+    console.log("Validation failed:", errors);
+  }}
+>
+  <Field.Root>
+    <Field.Label>Email</Field.Label>
+    <Field.Control name="email" type="email" required />
+    <Field.Error />
+  </Field.Root>
+
+  <Field.Root>
+    <Field.Label>Password</Field.Label>
+    <Field.Control name="password" type="password" required minLength={8} />
+    <Field.Error />
+  </Field.Root>
+
+  <SubmitButton />
+</Form>
+```
+
+### Pendingステート付き送信ボタン
+
+```tsx
+function SubmitButton() {
+  const { isPending } = useFormContext();
+
+  return (
+    <button type="submit" disabled={isPending}>
+      {isPending ? "Submitting..." : "Submit"}
+    </button>
+  );
+}
+```
+
+### サーバーサイドエラー
+
+```tsx
+function LoginForm() {
+  const [serverErrors, setServerErrors] = React.useState<FormErrors>({});
+
+  return (
+    <Form
+      errors={serverErrors}
+      onSubmit={async (data) => {
+        const result = await loginAction(data);
+        if (result.error) {
+          setServerErrors({ email: result.error });
+        }
+      }}
+    >
+      {/* ... fields ... */}
+    </Form>
+  );
+}
+```
+
+## バリデーションフロー
+
+```
+ユーザーがSubmitをクリック
+        |
+        v
+  e.preventDefault()
+        |
+        v
+  form.checkValidity()
+        |
+    +---+---+
+    |       |
+  valid   invalid
+    |       |
+    v       v
+  onSubmit  collectErrors()
+  (async)   setErrors()
+    |       onError()
+    v
+  成功/エラー
+```
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| `noValidate` | ブラウザバリデーションUIを引き継ぐ |
+| `checkValidity()` | プログラムで制約バリデーションをトリガー |
+| エラー収集 | フォーム要素を反復し、`validationMessage`を読み取る |
+| 非同期送信 | ローディングインジケーター用のpendingステートを追跡 |
+| Form context | エラーとpendingステートを子コンポーネントと共有 |
+| サーバーエラーのマージ | クライアントサイドとサーバーサイドのバリデーションを結合 |
+
+Formモジュールが完成しました。これで完全なフォームシステムを手に入れました：個々のフィールドコンポジション用の**Field**、ネイティブバリデーション用の**Constraint Validation**、送信オーケストレーション用の**Form**。これら3つのピースが連携して、サードパーティのフォームライブラリなしであらゆるフォームシナリオに対応できます。

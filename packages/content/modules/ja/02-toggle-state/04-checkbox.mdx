@@ -1,0 +1,305 @@
+---
+title: "ヘッドレスCheckboxの構築"
+description: "indeterminateステートのサポート、CheckboxIndicator複合コンポーネントパターン、適切なaria-checked値を備えたヘッドレスCheckboxコンポーネントを構築します。"
+order: 4
+isFree: false
+---
+
+# ヘッドレスCheckboxの構築
+
+Checkboxは、ネイティブHTMLがうまく処理できない概念を導入します：**indeterminate（不確定）ステート**です。また、Base UIが視覚的なステート表現に広く使用する**Indicator**複合コンポーネントパターンも導入します。
+
+## Checkboxの3つのステート
+
+Switch（バイナリ）とは異なり、Checkboxには3つの可能なステートがあります：
+
+| ステート | `aria-checked` | 意味 |
+|---------|---------------|------|
+| 未チェック | `"false"` | 選択されていない |
+| チェック済み | `"true"` | 選択されている |
+| 不確定 | `"mixed"` | 部分的に選択（例: グループの親） |
+
+indeterminateステートはHTML属性だけでは設定できません。ネイティブHTMLでは、JavaScriptで`element.indeterminate = true`を設定する必要があります。ヘッドレスコンポーネントでは、これを明示的にモデル化します。
+
+## ステップ1: Propsの定義
+
+```tsx
+import * as React from "react";
+import { useControllableState } from "./use-controllable-state";
+
+type CheckedState = boolean | "indeterminate";
+
+interface CheckboxProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  /** 制御されたcheckedステート */
+  checked?: CheckedState;
+  /** 非制御モードの初期checkedステート */
+  defaultChecked?: CheckedState;
+  /** checkedステートが変更されたときに呼ばれるコールバック */
+  onCheckedChange?: (checked: CheckedState) => void;
+  /** checkboxが必須かどうか */
+  required?: boolean;
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+`CheckedState`を3値のenumではなく`boolean | "indeterminate"`としてモデル化しています。これにより、一般的なケース（true/false）を使いやすく保ちながら、特殊なケースを明示的にサポートします。
+
+## ステップ2: ルートコンポーネントの実装
+
+```tsx
+export function Checkbox({
+  checked: controlledChecked,
+  defaultChecked = false,
+  onCheckedChange,
+  disabled,
+  required,
+  render,
+  ref,
+  children,
+  ...props
+}: CheckboxProps) {
+  const [checked, setChecked] = useControllableState<CheckedState>({
+    value: controlledChecked,
+    defaultValue: defaultChecked,
+    onChange: onCheckedChange,
+  });
+
+  const handleClick = () => {
+    if (!disabled) {
+      // indeterminateは常にcheckedに遷移
+      setChecked(checked === true ? false : true);
+    }
+  };
+
+  // CheckedStateをaria-checkedの値にマッピング
+  const ariaChecked = checked === "indeterminate" ? "mixed" : checked;
+
+  const elementProps = {
+    ...props,
+    ref,
+    role: "checkbox" as const,
+    "aria-checked": ariaChecked,
+    "aria-required": required || undefined,
+    disabled,
+    type: "button" as const,
+    onClick: handleClick,
+    "data-checked": checked === true || undefined,
+    "data-unchecked": checked === false || undefined,
+    "data-indeterminate": checked === "indeterminate" || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  // context経由で子のIndicatorにステートを提供
+  const contextValue = React.useMemo(
+    () => ({ checked, disabled }),
+    [checked, disabled],
+  );
+
+  const element = render
+    ? React.cloneElement(render, elementProps)
+    : <button {...elementProps}>{children}</button>;
+
+  return (
+    <CheckboxContext value={contextValue}>
+      {element}
+    </CheckboxContext>
+  );
+}
+```
+
+### 主な設計判断
+
+| 判断 | 理由 |
+|------|------|
+| `<button>`に`role="checkbox"` | ネイティブの`<input type="checkbox">`はスタイリングが困難。ARIAを持つbuttonは完全にアクセシブルかつスタイルフリー |
+| indeterminateはクリック時にcheckedになる | 標準的な動作 -- ユーザー操作でindeterminateに「戻す」方法はない |
+| `aria-checked="mixed"` | indeterminateに対するARIA仕様の値。`"indeterminate"`ではない |
+
+## ステップ3: CheckboxIndicatorパターン
+
+Indicatorは、checkboxが特定のステートにある場合にのみレンダリングする子コンポーネントです。これにより、利用者はカスタムチェックアイコン、アニメーションSVG、その他の視覚要素を提供できます：
+
+```tsx
+interface CheckboxContextValue {
+  checked: CheckedState;
+  disabled?: boolean;
+}
+
+const CheckboxContext = React.createContext<CheckboxContextValue>({
+  checked: false,
+});
+
+interface CheckboxIndicatorProps extends React.ComponentPropsWithoutRef<"span"> {
+  /**
+   * trueの場合、indicatorはすべてのステート（checkedとindeterminate）でレンダリングされます。
+   * false（デフォルト）の場合、checkedの場合にのみレンダリングされます。
+   * @default false
+   */
+  keepMounted?: boolean;
+  ref?: React.Ref<HTMLSpanElement>;
+}
+
+export function CheckboxIndicator({
+  keepMounted = false,
+  children,
+  ref,
+  ...props
+}: CheckboxIndicatorProps) {
+  const { checked } = React.useContext(CheckboxContext);
+
+  const isVisible = checked === true || checked === "indeterminate";
+
+  // keepMountedでなく、表示でもない場合、何もレンダリングしない
+  if (!keepMounted && !isVisible) {
+    return null;
+  }
+
+  return (
+    <span
+      ref={ref}
+      {...props}
+      data-checked={checked === true || undefined}
+      data-unchecked={checked === false || undefined}
+      data-indeterminate={checked === "indeterminate" || undefined}
+      // 表示でないがkeepMountedの場合は非表示
+      hidden={!isVisible ? true : undefined}
+    >
+      {children}
+    </span>
+  );
+}
+```
+
+## ステップ4: 隠しネイティブInput
+
+フォーム送信のために、checkbox値を持つ隠しネイティブ`<input>`が必要です：
+
+```tsx
+function BubbleInput({
+  checked,
+  ...props
+}: React.ComponentPropsWithoutRef<"input"> & { checked: CheckedState }) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // indeterminateプロパティを同期（属性では設定不可）
+  React.useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = checked === "indeterminate";
+    }
+  }, [checked]);
+
+  return (
+    <input
+      ref={inputRef}
+      type="checkbox"
+      checked={checked === true}
+      {...props}
+      style={{
+        position: "absolute",
+        pointerEvents: "none",
+        opacity: 0,
+        margin: 0,
+        ...props.style,
+      }}
+      tabIndex={-1}
+      aria-hidden
+    />
+  );
+}
+```
+
+この隠しinputにより、checkboxがネイティブの`<form>`送信で動作し、フォームバリデーションAPIとも統合できます。
+
+## 使用例
+
+### 基本
+
+```tsx
+<Checkbox defaultChecked={false}>
+  <CheckboxIndicator>
+    <CheckIcon />
+  </CheckboxIndicator>
+</Checkbox>
+```
+
+### Indeterminate付き
+
+```tsx
+function SelectAllCheckbox({ items, selected }: Props) {
+  const allSelected = selected.length === items.length;
+  const someSelected = selected.length > 0 && !allSelected;
+
+  return (
+    <Checkbox
+      checked={allSelected ? true : someSelected ? "indeterminate" : false}
+      onCheckedChange={(checked) => {
+        if (checked === true) {
+          selectAll();
+        } else {
+          deselectAll();
+        }
+      }}
+    >
+      <CheckboxIndicator>
+        {someSelected ? <MinusIcon /> : <CheckIcon />}
+      </CheckboxIndicator>
+    </Checkbox>
+  );
+}
+```
+
+### ラベル付き制御
+
+```tsx
+function AgreeCheckbox() {
+  const [agreed, setAgreed] = React.useState<CheckedState>(false);
+
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <Checkbox checked={agreed} onCheckedChange={setAgreed}>
+        <CheckboxIndicator>
+          <CheckIcon />
+        </CheckboxIndicator>
+      </Checkbox>
+      利用規約に同意します
+    </label>
+  );
+}
+```
+
+## スタイリング
+
+```css
+.checkbox[data-checked] {
+  background: var(--color-primary-500);
+  border-color: var(--color-primary-500);
+}
+
+.checkbox[data-indeterminate] {
+  background: var(--color-primary-300);
+  border-color: var(--color-primary-300);
+}
+
+.checkbox[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.checkbox-indicator[data-indeterminate] svg {
+  transform: scaleX(0.6);
+}
+```
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| 3ステートのモデリング | `boolean \| "indeterminate"`と`aria-checked="mixed"` |
+| Indicatorパターン | 親のステートに基づいて条件付きレンダリングする複合コンポーネント |
+| 隠しネイティブinput | フォーム送信を可能にし、`indeterminate`プロパティを同期 |
+| 複合コンポーネント用のContext | 親がReact Context経由で子とステートを共有 |
+
+Checkboxで「Toggle & State」モジュールが完成です。これで、バイナリステート（Switch）、pressedステート（Toggle）、グループステート（ToggleGroup）、3ステート（Checkbox）を扱うツールが揃いました。次はフォームシステムに進みます。
+
+<Exercise id="checkbox-basic" />

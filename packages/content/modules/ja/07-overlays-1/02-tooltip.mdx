@@ -1,0 +1,333 @@
+---
+title: "Tooltipコンポーネントの構築"
+description: "ホバー/フォーカストリガー、設定可能な遅延、ARIA tooltip role、Portalレンダリングを備えたアクセシブルなTooltipの構築方法を学びます。"
+order: 2
+isFree: false
+---
+
+# Tooltipコンポーネントの構築
+
+**Tooltip**は、ユーザーがトリガー要素にホバーまたはフォーカスしたときに補足情報を表示する小さなオーバーレイです。Tooltipは非インタラクティブで、テキストのみを含み、ボタンやリンクは含みません。この区別はARIAセマンティクスとインタラクションモデルに影響するため重要です。
+
+## Tooltipを使うべきとき
+
+| Tooltipを使う | Tooltipを使わない |
+|------------|-------------------|
+| ラベルが必要なアイコンのみのボタン | リンクやボタンを含むコンテンツ（Popoverを使用） |
+| 略語や専門用語 | 必須のフォームフィールド説明（表示テキストを使用） |
+| 簡潔なラベルの補足コンテキスト | ユーザーが必ず見る必要のある重要情報（インラインテキストを使用） |
+
+<Callout type="warning">
+Tooltipはトリガーされるまで見えないため、必須情報を含めてはいけません。ユーザーがタスクを完了するためにその内容が必要な場合は、代わりにインラインで表示してください。
+</Callout>
+
+## ARIAセマンティクス
+
+WAI-ARIA仕様ではTooltipコンテンツに`role="tooltip"`を定義しています：
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `role="tooltip"` | フローティング要素 | 要素をTooltipとして識別 |
+| `aria-describedby` | トリガー要素 | トリガーをTooltipコンテンツにリンク |
+| `id` | フローティング要素 | `aria-describedby`が参照する値 |
+
+スクリーンリーダーがトリガーに遭遇すると、次のように読み上げます：「ボタンラベル... [一時停止] ...Tooltipの説明。」`aria-describedby`の関係により、Tooltipのコンテンツはトリガーのラベルの補足情報として扱われます。
+
+```tsx
+<button aria-describedby="tip-1">
+  <SaveIcon />
+</button>
+<div role="tooltip" id="tip-1">
+  Save document
+</div>
+```
+
+<Callout type="info">
+Tooltipには`aria-describedby`を使用してください（`aria-labelledby`ではありません）。Tooltipは**説明**を提供するものであり、主要な**ラベル**ではありません。アイコンボタンに表示テキストがない場合は、ボタンに`aria-label`を主要ラベルとして追加し、Tooltipを補足説明として使用します。
+</Callout>
+
+## インタラクションモデル
+
+### トリガーイベント
+
+Tooltipは2つの入力方式に応答します：
+
+| 入力 | 表示イベント | 非表示イベント |
+|------|-------------|---------------|
+| マウス | トリガーの`mouseenter` | トリガーの`mouseleave` |
+| キーボード | トリガーの`focus` | トリガーの`blur` |
+
+両方のパスが独立して動作する必要があります。フォームをタブ移動するキーボードユーザーはフォーカス時にTooltipを見ることができ、マウスユーザーはホバー時にTooltipを見ることができなければなりません。
+
+### 開閉遅延
+
+Tooltipはちらつきを防ぐため、表示前に短い遅延を設けるべきです。ユーザーが複数のトリガー上をマウスで素早く移動した場合に有効です。一般的なパターン：
+
+- **表示遅延**: 300-700ms（設定可能）
+- **非表示遅延**: 0-150ms（カーソルが一瞬離れて再び入る場合に対応）
+
+```tsx
+function useDelayedState(openDelay: number, closeDelay: number) {
+  const [open, setOpen] = React.useState(false);
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  const show = React.useCallback(() => {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setOpen(true), openDelay);
+  }, [openDelay]);
+
+  const hide = React.useCallback(() => {
+    clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setOpen(false), closeDelay);
+  }, [closeDelay]);
+
+  const hideImmediately = React.useCallback(() => {
+    clearTimeout(timeoutRef.current);
+    setOpen(false);
+  }, []);
+
+  // アンマウント時のクリーンアップ
+  React.useEffect(() => {
+    return () => clearTimeout(timeoutRef.current);
+  }, []);
+
+  return { open, show, hide, hideImmediately };
+}
+```
+
+### Escapeキー
+
+`Escape`を押すと、開いているTooltipを即座に閉じる必要があります。これはアクセシビリティにとって重要です — 画面拡大ツールのユーザーはTooltipの下のコンテンツを見るために、Tooltipを消す必要がある場合があります。
+
+## コンポーネントAPI設計
+
+```tsx
+interface TooltipProps {
+  content: React.ReactNode;       // Tooltipのテキストコンテンツ
+  openDelay?: number;             // 表示前の遅延（デフォルト: 400ms）
+  closeDelay?: number;            // 非表示前の遅延（デフォルト: 100ms）
+  placement?: Placement;          // Floating UIのplacement
+  children: React.ReactElement;   // トリガー要素
+}
+```
+
+コンパウンドコンポーネント：
+
+- **`Tooltip.Provider`** — オプションの共有遅延グループ（トリガー間を移動する際の再遅延を回避）。
+- **`Tooltip.Root`** — 開閉状態、遅延タイマーを管理し、contextを提供。
+- **`Tooltip.Trigger`** — ホバー/フォーカスハンドラーでアンカー要素をラップ。
+- **`Tooltip.Content`** — Portalを通じてレンダリングされるフローティングTooltip。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+  type Placement,
+} from "@floating-ui/react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface TooltipContextValue {
+  open: boolean;
+  show: () => void;
+  hide: () => void;
+  hideImmediately: () => void;
+  tooltipId: string;
+  refs: ReturnType<typeof useFloating>["refs"];
+  floatingStyles: React.CSSProperties;
+}
+
+const TooltipContext = React.createContext<TooltipContextValue | null>(null);
+
+function useTooltipContext() {
+  const ctx = React.useContext(TooltipContext);
+  if (!ctx) throw new Error("Tooltip components must be used within Tooltip.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  openDelay = 400,
+  closeDelay = 100,
+  placement = "top",
+  children,
+}: {
+  openDelay?: number;
+  closeDelay?: number;
+  placement?: Placement;
+  children: React.ReactNode;
+}) {
+  const tooltipId = React.useId();
+  const { open, show, hide, hideImmediately } = useDelayedState(openDelay, closeDelay);
+
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement,
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  const ctx = React.useMemo(
+    () => ({ open, show, hide, hideImmediately, tooltipId, refs, floatingStyles }),
+    [open, show, hide, hideImmediately, tooltipId, refs, floatingStyles],
+  );
+
+  return <TooltipContext value={ctx}>{children}</TooltipContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({ children }: { children: React.ReactElement }) {
+  const { open, show, hide, hideImmediately, tooltipId, refs } = useTooltipContext();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape" && open) {
+      hideImmediately();
+    }
+  };
+
+  return React.cloneElement(children, {
+    ref: refs.setReference,
+    "aria-describedby": open ? tooltipId : undefined,
+    onMouseEnter: show,
+    onMouseLeave: hide,
+    onFocus: show,
+    onBlur: hideImmediately,
+    onKeyDown: handleKeyDown,
+  });
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, tooltipId, refs, floatingStyles } = useTooltipContext();
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      ref={refs.setFloating}
+      id={tooltipId}
+      role="tooltip"
+      style={floatingStyles}
+      className={className}
+      {...props}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+export const Tooltip = { Root, Trigger, Content };
+```
+
+## `cloneElement`の動作原理
+
+`Trigger`コンポーネントは`React.cloneElement`を使って、余分なDOMノードで囲むことなく子要素にpropsを注入します。これはヘッドレスUIライブラリで一般的なパターンです：
+
+```tsx
+// ユーザーが書くコード：
+<Tooltip.Trigger>
+  <button>Save</button>
+</Tooltip.Trigger>
+
+// レンダリング結果：
+<button aria-describedby="tooltip-id" ...>Save</button>
+// ラッパーdivなし — ボタンがそのままトリガーになる
+```
+
+これによりトリガーの元々のセマンティクスとスタイリングが保持されます。
+
+<Callout type="tip">
+`cloneElement`の代替として、render propパターン（関数としての`children`）や`Slot`コンポーネントがあります。それぞれトレードオフがありますが、少数のpropsとrefを注入するには`cloneElement`が最もシンプルです。
+</Callout>
+
+## 使用例
+
+```tsx
+function App() {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        <button aria-label="Save">
+          <SaveIcon />
+        </button>
+      </Tooltip.Trigger>
+      <Tooltip.Content className="tooltip">
+        Save your changes
+      </Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+```
+
+## CSSの戦略
+
+Tooltipのスタイリングは最小限かつ明確であるべきです：
+
+```css
+.tooltip {
+  background: var(--color-surface-inverse);
+  color: var(--color-text-inverse);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  max-width: 240px;
+  pointer-events: none; /* Tooltipは非インタラクティブ */
+  z-index: 50;
+}
+```
+
+`pointer-events: none`ルールはTooltipが非インタラクティブであることを強制します。マウスイベントはTooltipを透過して背後の要素に届きます。
+
+## アニメーションの考慮事項
+
+スムーズな表示/非表示アニメーションのためには、閉じた後もTooltipをDOMに一時的に残す必要があります。これには2段階のアプローチが必要です：
+
+1. `data-state`属性を設定（`"open"`または`"closed"`）
+2. `opacity`と`transform`にCSSトランジションを使用
+3. トランジション完了後にDOMから要素を削除
+
+```css
+.tooltip[data-state="open"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tooltip[data-state="closed"] {
+  opacity: 0;
+  transform: translateY(4px);
+}
+```
+
+<Callout type="info">
+常に`prefers-reduced-motion`を尊重してください。ユーザーがモーション軽減を好む場合は、transformアニメーションをスキップし、シンプルなopacityフェードまたはアニメーションなしにしてください。
+</Callout>
+
+## 重要なポイント
+
+1. **`role="tooltip"`**はオーバーレイを補足情報として識別します。
+2. **`aria-describedby`**はトリガーとTooltipをリンクし、スクリーンリーダーが読み上げます。
+3. **ホバーとフォーカス**の両方が独立してTooltipをトリガーする必要があります。
+4. **表示/非表示遅延**はトリガー間を移動する際のちらつきを防ぎます。
+5. **`Escape`**キーはTooltipを即座に閉じる必要があります。
+6. **Portalレンダリング**は親コンテナのCSSクリッピングを防ぎます。
+7. **`pointer-events: none`**はTooltipの非インタラクティブな性質を強制します。
+
+## 自分で試してみよう
+
+<Exercise id="tooltip-basic" />

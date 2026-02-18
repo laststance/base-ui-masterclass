@@ -1,0 +1,316 @@
+---
+title: "フォーカストラップの基礎"
+description: "センチネル要素、inert属性、タブ循環、初期フォーカスの配置、フォーカスリターンを使ったフォーカストラップの仕組みを学びます。"
+order: 1
+isFree: false
+---
+
+# フォーカストラップの基礎
+
+モーダルダイアログが開くと、フォーカスはダイアログの**内部**に留まる必要があります。ユーザーがオーバーレイの背後のページにタブ移動できてはいけません。この動作は**フォーカストラップ**と呼ばれ、オーバーレイコンポーネントにおいて最も重要なアクセシビリティパターンの1つです。
+
+## フォーカストラップが重要な理由
+
+フォーカストラップがないと、キーボードユーザーは開いているダイアログからオーバーレイの下のページにタブ移動できてしまいます。これは混乱を招く体験になります：
+
+1. 背景幕がフォーカスされた要素を覆っているため、ユーザーにはその要素が見えない。
+2. スクリーンリーダーがモーダルの背後にある視覚的に隠された要素を読み上げてしまう。
+3. ユーザーが見えないコントロールを誤って操作してしまう可能性がある。
+
+WAI-ARIAオーサリングプラクティスでは、`aria-modal="true"`を持つダイアログはフォーカスをダイアログ内に**制約しなければならない**と明示しています。
+
+## フォーカストラップのライフサイクル
+
+フォーカストラップは厳格なライフサイクルに従います：
+
+| フェーズ | アクション |
+|---------|----------|
+| **開く** | 最初のフォーカス可能な要素（または指定された初期フォーカスターゲット）にフォーカスを移動 |
+| **アクティブ** | Tab/Shift+Tabの循環をダイアログ内に制約 |
+| **閉じる** | ダイアログを開いた要素にフォーカスを戻す |
+
+いずれかのフェーズが欠けると、アクセシビリティ違反になります。
+
+## センチネル要素によるタブ循環
+
+フォーカストラップの最も信頼性の高い手法は**センチネル要素**を使用します — ダイアログコンテンツの先頭と末尾に配置された、目に見えないフォーカス可能な要素です。
+
+```
+[Sentinel Start] ← 最後の要素からTabすると受け取る
+  [First Focusable]
+  [Second Focusable]
+  ...
+  [Last Focusable]
+[Sentinel End] ← 最初の要素からShift+Tabすると受け取る
+```
+
+フォーカスがセンチネルに到達すると、反対側にラップします：
+
+```tsx
+function FocusTrap({ children }: { children: React.ReactNode }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  const getFocusableElements = () => {
+    if (!containerRef.current) return [];
+    const selectors = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+    return Array.from(
+      containerRef.current.querySelectorAll<HTMLElement>(selectors),
+    );
+  };
+
+  const handleSentinelFocus = (position: "start" | "end") => {
+    const focusable = getFocusableElements();
+    if (focusable.length === 0) return;
+
+    if (position === "start") {
+      // 最初の要素より前にタブ移動 — 最後にラップ
+      focusable[focusable.length - 1].focus();
+    } else {
+      // 最後の要素より後にタブ移動 — 最初にラップ
+      focusable[0].focus();
+    }
+  };
+
+  return (
+    <>
+      <div tabIndex={0} onFocus={() => handleSentinelFocus("start")} />
+      <div ref={containerRef}>{children}</div>
+      <div tabIndex={0} onFocus={() => handleSentinelFocus("end")} />
+    </>
+  );
+}
+```
+
+### センチネルの動作原理
+
+ユーザーがダイアログ内の最後のフォーカス可能な要素で`Tab`を押すと、フォーカスは自然にDOM内の次のフォーカス可能な要素 — つまり**エンドセンチネル**に移動します。センチネルの`onFocus`ハンドラーが即座にフォーカスを最初のフォーカス可能な要素にリダイレクトし、シームレスなループを作ります。
+
+同様に、最初のフォーカス可能な要素で`Shift+Tab`を押すと、フォーカスは**スタートセンチネル**に移動し、そこから最後のフォーカス可能な要素にリダイレクトされます。
+
+<Callout type="tip">
+センチネル要素はフォーカス可能にするために`tabIndex={0}`が必要ですが、視覚的には非表示にすべきです。表示するコンテンツは不要で、フォーカスをキャッチしてリダイレクトすることだけが目的です。
+</Callout>
+
+## `inert`属性
+
+センチネル要素はタブ循環を処理しますが、スクリーンリーダーがダイアログ外のコンテンツを読み上げることは防げません。**`inert`**属性はこの問題を解決します — 要素を不活性にマークし、非インタラクティブかつ支援技術から見えなくします。
+
+```tsx
+React.useEffect(() => {
+  if (!open) return;
+
+  // ダイアログ外のすべてをinertにマーク
+  const siblings = Array.from(document.body.children).filter(
+    (el) => el !== dialogRef.current?.parentElement,
+  );
+
+  siblings.forEach((el) => el.setAttribute("inert", ""));
+
+  return () => {
+    siblings.forEach((el) => el.removeAttribute("inert"));
+  };
+}, [open]);
+```
+
+要素に`inert`属性がある場合：
+
+| 動作 | 効果 |
+|------|------|
+| **クリック** | 無視される — 要素はクリックできない |
+| **フォーカス** | スキップされる — Tabで停止しない |
+| **スクリーンリーダー** | 非表示 — 支援技術が無視する |
+| **テキスト選択** | 防止される |
+
+<Callout type="info">
+`inert`属性は現在すべてのモダンブラウザでサポートされています。これは、スクリーンリーダーからコンテンツを隠すだけでフォーカスやインタラクションを防止しなかった、従来の兄弟要素に`aria-hidden="true"`を設定するパターンの代替です。
+</Callout>
+
+## 初期フォーカスの配置
+
+ダイアログが開くとき、フォーカスは最も適切な要素に移動すべきです：
+
+| 優先度 | ターゲット | 例 |
+|--------|----------|-----|
+| 1 | 明示的な初期フォーカスターゲット | `autoFocus` propまたは`data-autofocus`属性 |
+| 2 | 最初のインタラクティブ要素 | フォームダイアログの最初の入力フィールド |
+| 3 | ダイアログコンテナ自体 | 入力のない情報ダイアログ |
+
+```tsx
+function useInitialFocus(
+  containerRef: React.RefObject<HTMLElement | null>,
+  open: boolean,
+) {
+  React.useEffect(() => {
+    if (!open || !containerRef.current) return;
+
+    // 優先度1: data-autofocusを持つ要素
+    const autoFocusTarget =
+      containerRef.current.querySelector<HTMLElement>("[data-autofocus]");
+    if (autoFocusTarget) {
+      autoFocusTarget.focus();
+      return;
+    }
+
+    // 優先度2: 最初のフォーカス可能な要素
+    const focusableSelectors = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    const firstFocusable =
+      containerRef.current.querySelector<HTMLElement>(focusableSelectors);
+    if (firstFocusable) {
+      firstFocusable.focus();
+      return;
+    }
+
+    // 優先度3: コンテナ自体
+    containerRef.current.focus();
+  }, [open, containerRef]);
+}
+```
+
+<Callout type="warning">
+破壊的なアクションに自動フォーカスしてはいけません。「キャンセル」と「削除」ボタンがある確認ダイアログでは、フォーカスは「キャンセル」— 安全な選択肢から始めるべきです。これにより、ダイアログが開いた直後にEnterを押して誤ってデータを失うことを防ぎます。
+</Callout>
+
+## フォーカスリターン
+
+ダイアログが閉じるとき、フォーカスはダイアログの開始をトリガーした要素に戻る必要があります。通常はダイアログを開くためにクリックされたボタンです。
+
+```tsx
+function useReturnFocus(open: boolean) {
+  const triggerRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      // ダイアログがフォーカスを奪う前に、現在フォーカスされている要素をキャプチャ
+      triggerRef.current = document.activeElement as HTMLElement;
+    } else if (triggerRef.current) {
+      // 閉じるときにフォーカスを戻す
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [open]);
+}
+```
+
+このパターンはダイアログが開くとき（フォーカスがダイアログ内に移動する前に）`document.activeElement`をキャプチャし、ダイアログが閉じるときにそれを復元します。
+
+## スクロールロック
+
+モーダルダイアログが開いているとき、背後のページはスクロールしないようにすべきです。ユーザーがダイアログと対話している間に背景コンテンツが動くと、方向感覚を失わせる体験になります。
+
+```tsx
+React.useEffect(() => {
+  if (!open) return;
+
+  const scrollY = window.scrollY;
+  const originalOverflow = document.body.style.overflow;
+  const originalPosition = document.body.style.position;
+  const originalTop = document.body.style.top;
+  const originalWidth = document.body.style.width;
+
+  document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${scrollY}px`;
+  document.body.style.width = "100%";
+
+  return () => {
+    document.body.style.overflow = originalOverflow;
+    document.body.style.position = originalPosition;
+    document.body.style.top = originalTop;
+    document.body.style.width = originalWidth;
+    window.scrollTo(0, scrollY);
+  };
+}, [open]);
+```
+
+<Callout type="info">
+`overflow: hidden`だけではiOS Safariでは不十分です。`position: fixed` + `top`オフセットの手法はすべてのプラットフォームで動作します。スクロール位置はロック前に保存され、アンロック後に復元されるため、ページが先頭にジャンプすることを防ぎます。
+</Callout>
+
+## すべてを組み合わせる：`useFocusTrap` hook
+
+プロダクション品質のフォーカストラップは4つの動作すべてを1つのhookに統合します：
+
+```tsx
+function useFocusTrap(open: boolean) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLElement | null>(null);
+
+  // トリガー要素のキャプチャ
+  React.useEffect(() => {
+    if (open) {
+      triggerRef.current = document.activeElement as HTMLElement;
+    }
+  }, [open]);
+
+  // 初期フォーカス
+  useInitialFocus(containerRef, open);
+
+  // 兄弟要素をinertにマーク
+  React.useEffect(() => {
+    if (!open || !containerRef.current) return;
+    const portal = containerRef.current.closest("[data-portal]");
+    const siblings = Array.from(document.body.children).filter(
+      (el) => el !== portal,
+    );
+    siblings.forEach((el) => el.setAttribute("inert", ""));
+    return () => siblings.forEach((el) => el.removeAttribute("inert"));
+  }, [open]);
+
+  // 閉じるときにフォーカスを戻す
+  React.useEffect(() => {
+    if (!open && triggerRef.current) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [open]);
+
+  return containerRef;
+}
+```
+
+## フォーカストラップのテスト
+
+フォーカストラップには特定のテスト戦略が必要です：
+
+```tsx
+test("focus stays within dialog on Tab", () => {
+  render(<Dialog open>
+    <input data-testid="first" />
+    <button data-testid="last">OK</button>
+  </Dialog>);
+
+  const first = screen.getByTestId("first");
+  const last = screen.getByTestId("last");
+
+  last.focus();
+  fireEvent.keyDown(last, { key: "Tab" });
+
+  // フォーカスは最初の要素にラップすべき
+  expect(document.activeElement).toBe(first);
+});
+```
+
+## 重要なポイント
+
+1. **フォーカストラップ**はTab/Shift+Tabの循環をダイアログ内に制約します。
+2. **センチネル要素**はダイアログの先頭と末尾でフォーカスをキャッチしてリダイレクトします。
+3. **`inert`**はダイアログ外のコンテンツをすべてのインタラクションと支援技術から隠します。
+4. **初期フォーカス**は最も適切な要素をターゲットにすべきです（破壊的アクションは決して選ばない）。
+5. **フォーカスリターン**でダイアログが閉じるときにトリガー要素にフォーカスを戻します。
+6. **スクロールロック**はダイアログが開いている間、背景のスクロールを防ぎます。
+7. 4つの動作（センチネル、inert、初期フォーカス、フォーカスリターン）すべてが連携して動作する必要があります。

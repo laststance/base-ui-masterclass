@@ -1,0 +1,227 @@
+---
+title: "ヘッドレスInputの構築"
+description: "非制御・制御モード、aria-invalidの統合、ステート駆動スタイリングのためのdata属性をサポートするヘッドレスInputコンポーネントの構築方法を学びます。"
+order: 2
+isFree: false
+---
+
+# ヘッドレスInputの構築
+
+Inputは**値のステート**を扱う最初のコンポーネントです -- 制御コンポーネントと非制御コンポーネントの区別です。これはBase UIのすべてのフォーム関連コンポーネントが依存する基礎的な概念です。
+
+## 制御 vs. 非制御
+
+Reactのinputは2つのモードで動作できます：
+
+| モード | ステートの所有者 | 使用するprops | 使用場面 |
+|--------|-----------------|--------------|----------|
+| **非制御** | DOM | `defaultValue` | シンプルなフォーム、リアルタイムバリデーション不要 |
+| **制御** | コンポーネント | `value` + `onChange` | フォームライブラリ、ライブバリデーション、派生ステート |
+
+ヘッドレスInputは**両方の**モードを透過的にサポートする必要があります。どちらのモードを使うかは利用者が決定し、コンポーネントは気にしません。
+
+## ステップ1: Propsの定義
+
+```tsx
+import * as React from "react";
+
+interface InputProps extends React.ComponentPropsWithoutRef<"input"> {
+  /**
+   * カスタム要素レンダリング用のオプショナルなrender prop。
+   * 計算されたpropsでcloneされるReactElementを受け取ります。
+   */
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLInputElement>;
+}
+```
+
+ネイティブの`<input>` propsを継承しているため、利用者は`type`、`placeholder`、`name`、`required`、`pattern`など、すべてのHTML属性をそのまま利用できます。
+
+## ステップ2: Data属性用の内部ステートの追跡
+
+ヘッドレスInputはdata属性を通じてステートを公開します。Base UIはいくつかのステートを追跡します：
+
+```tsx
+export function Input({
+  render,
+  disabled,
+  ref,
+  defaultValue,
+  value,
+  onChange,
+  onFocus,
+  onBlur,
+  ...props
+}: InputProps) {
+  const [focused, setFocused] = React.useState(false);
+  const [dirty, setDirty] = React.useState(false);
+  const [touched, setTouched] = React.useState(false);
+
+  // inputに値があるか判定（両モードで動作）
+  const isFilled = value != null ? value !== "" : dirty;
+
+  const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    setFocused(true);
+    onFocus?.(e);
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    setFocused(false);
+    setTouched(true);
+    onBlur?.(e);
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setDirty(true);
+    onChange?.(e);
+  };
+
+  // data属性の構築
+  const dataAttributes = {
+    "data-disabled": disabled || undefined,
+    "data-focused": focused || undefined,
+    "data-dirty": dirty || undefined,
+    "data-touched": touched || undefined,
+    "data-filled": isFilled || undefined,
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    disabled,
+    defaultValue,
+    value,
+    onChange: handleChange,
+    onFocus: handleFocus,
+    onBlur: handleBlur,
+    ...dataAttributes,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <input {...elementProps} />;
+}
+```
+
+### Data属性の詳細
+
+| 属性 | 表示タイミング | ユースケース |
+|------|--------------|-------------|
+| `data-disabled` | inputが無効化されている | グレーアウト、透明度の低下 |
+| `data-focused` | inputにフォーカスがある | フォーカスリングの表示 |
+| `data-dirty` | 値が変更された | 「未保存の変更」インジケーターの表示 |
+| `data-touched` | 少なくとも1回ブラーされた | インタラクション後にのみバリデーションエラーを表示 |
+| `data-filled` | inputに空でない値がある | フローティングラベルパターン |
+
+## ステップ3: aria-invalidの統合
+
+inputが無効な場合、スクリーンリーダーはそれを通知する必要があります。`aria-invalid`属性がこれを実現します：
+
+```tsx
+interface InputProps extends React.ComponentPropsWithoutRef<"input"> {
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLInputElement>;
+}
+
+export function Input({
+  render,
+  disabled,
+  ref,
+  "aria-invalid": ariaInvalid,
+  ...props
+}: InputProps) {
+  // ... 上記のステート追跡 ...
+
+  const dataAttributes = {
+    "data-disabled": disabled || undefined,
+    "data-focused": focused || undefined,
+    "data-dirty": dirty || undefined,
+    "data-touched": touched || undefined,
+    "data-filled": isFilled || undefined,
+    "data-invalid": ariaInvalid || undefined,
+    "data-valid": ariaInvalid === false ? true : undefined,
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    disabled,
+    "aria-invalid": ariaInvalid,
+    ...dataAttributes,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <input {...elementProps} />;
+}
+```
+
+これでCSSがバリデーションステートに応答できます：
+
+```css
+.my-input[data-invalid] {
+  border-color: var(--color-error);
+}
+
+.my-input[data-valid] {
+  border-color: var(--color-success);
+}
+```
+
+## ステップ4: 使用例
+
+### 非制御（シンプルなフォーム）
+
+```tsx
+<form>
+  <Input
+    name="email"
+    type="email"
+    placeholder="you@example.com"
+    defaultValue=""
+    required
+  />
+  <button type="submit">Submit</button>
+</form>
+```
+
+### 制御（ライブバリデーション）
+
+```tsx
+function EmailInput() {
+  const [email, setEmail] = React.useState("");
+  const isValid = email.includes("@");
+
+  return (
+    <Input
+      value={email}
+      onChange={(e) => setEmail(e.target.value)}
+      aria-invalid={email.length > 0 ? !isValid : undefined}
+      placeholder="you@example.com"
+    />
+  );
+}
+```
+
+### ポリモーフィックレンダリング
+
+```tsx
+<Input render={<textarea />} placeholder="Write your message..." />
+```
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| 制御 vs. 非制御 | `value`/`onChange`と`defaultValue`で両方をサポート |
+| ステート追跡 | ライフサイクルを把握するための`dirty`、`touched`、`focused`、`filled` |
+| `aria-invalid` | バリデーション状態をARIAとdata属性の両方に反映 |
+| Data属性 | CSS駆動スタイリングのためにすべてのステートを公開 |
+
+Inputは、すべてのフォームコンポーネントで繰り返し現れる**ステートの二面性**パターンを教えてくれます。次は、最もシンプルなセマンティックHTMLコンポーネントであるSeparatorを構築します。
+
+<Exercise id="input-basic" />

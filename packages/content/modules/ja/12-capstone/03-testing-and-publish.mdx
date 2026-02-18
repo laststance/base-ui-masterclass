@@ -1,0 +1,389 @@
+---
+title: "テスト戦略と公開"
+description: "コンポーネントライブラリの完全なテスト戦略（Testing Libraryによるユニットテスト、axe-coreによるa11yテスト、ビジュアルリグレッションテスト）と、セマンティックバージョニング、changesets、CI/CDを使ったnpm公開を学びます。"
+order: 3
+isFree: false
+---
+
+# テスト戦略と公開
+
+この最終レッスンでは、2つの重要なトピックをカバーします：**コンポーネントライブラリの徹底的なテスト**と**プロフェッショナルなワークフローでのnpmへの公開**です。十分にテストされたライブラリはコンシューマーの信頼を構築し、十分に自動化された公開パイプラインにより常に信頼性の高いアップデートが届きます。
+
+## コンポーネントライブラリのテストピラミッド
+
+コンポーネントライブラリには、アプリケーションテストとは異なる特有のテストプロファイルがあります：
+
+| レイヤー | ツール | テスト対象 | カバレッジ |
+|-------|------|---------------|----------|
+| **ユニットテスト** | Vitest + Testing Library | コンポーネントの動作、ARIA属性、キーボード操作 | ~70% |
+| **アクセシビリティテスト** | axe-core + Testing Library | WCAG準拠、ラベルの欠落、コントラスト | ~15% |
+| **ビジュアルテスト** | Playwrightスクリーンショット | ピクセルレベルのレンダリング、レイアウトリグレッション | ~10% |
+| **統合テスト** | Storybookインタラクションテスト | マルチコンポーネントワークフロー、リアルDOM | ~5% |
+
+## Testing Libraryによるユニットテスト
+
+Testing Libraryの哲学 — 実装の詳細ではなく、ユーザーがコンポーネントとどうやり取りするかをテストする — は、ヘッドレスコンポーネントテストに完全に適合します。公開APIをテストします：レンダリング出力、ARIA属性、キーボードイベント、ステート変更。
+
+### ARIA属性のテスト
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import { Slider } from "./slider";
+
+test("thumb has role='slider' with correct ARIA attributes", () => {
+  render(
+    <Slider.Root defaultValue={50} min={0} max={100}>
+      <Slider.Track>
+        <Slider.Range />
+      </Slider.Track>
+      <Slider.Thumb aria-label="Volume" />
+    </Slider.Root>,
+  );
+
+  const thumb = screen.getByRole("slider");
+  expect(thumb).toHaveAttribute("aria-valuenow", "50");
+  expect(thumb).toHaveAttribute("aria-valuemin", "0");
+  expect(thumb).toHaveAttribute("aria-valuemax", "100");
+  expect(thumb).toHaveAttribute("aria-label", "Volume");
+});
+```
+
+### キーボード操作のテスト
+
+```tsx
+import { render, screen, fireEvent } from "@testing-library/react";
+import { NumberField } from "./number-field";
+
+test("ArrowUp increments value by step", () => {
+  const onValueChange = vi.fn();
+
+  render(
+    <NumberField.Root defaultValue={5} step={1} onValueChange={onValueChange}>
+      <NumberField.Input aria-label="Quantity" />
+    </NumberField.Root>,
+  );
+
+  const input = screen.getByRole("spinbutton");
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  expect(onValueChange).toHaveBeenCalledWith(6);
+});
+
+test("value does not exceed max", () => {
+  const onValueChange = vi.fn();
+
+  render(
+    <NumberField.Root defaultValue={99} max={100} step={5} onValueChange={onValueChange}>
+      <NumberField.Input aria-label="Quantity" />
+    </NumberField.Root>,
+  );
+
+  const input = screen.getByRole("spinbutton");
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  expect(onValueChange).toHaveBeenCalledWith(100); // maxにクランプ
+});
+```
+
+### ステート変更のテスト
+
+```tsx
+test("clicking increment button updates displayed value", () => {
+  render(
+    <NumberField.Root defaultValue={0}>
+      <NumberField.Decrement>-</NumberField.Decrement>
+      <NumberField.Input aria-label="Count" />
+      <NumberField.Increment>+</NumberField.Increment>
+    </NumberField.Root>,
+  );
+
+  const input = screen.getByRole("spinbutton");
+  const incrementBtn = screen.getByLabelText("Increment");
+
+  expect(input).toHaveAttribute("aria-valuenow", "0");
+  fireEvent.click(incrementBtn);
+  expect(input).toHaveAttribute("aria-valuenow", "1");
+});
+```
+
+## axe-coreによるアクセシビリティテスト
+
+[axe-core](https://github.com/dequelabs/axe-core)は、主要な自動アクセシビリティテストエンジンです。`vitest-axe` または `jest-axe` を使ってテストスイートに統合します：
+
+```bash
+pnpm add -D vitest-axe
+```
+
+```tsx
+import { render } from "@testing-library/react";
+import { axe, toHaveNoViolations } from "vitest-axe";
+
+expect.extend(toHaveNoViolations);
+
+test("Slider has no accessibility violations", async () => {
+  const { container } = render(
+    <Slider.Root defaultValue={50} min={0} max={100}>
+      <Slider.Track>
+        <Slider.Range />
+      </Slider.Track>
+      <Slider.Thumb aria-label="Volume" />
+    </Slider.Root>,
+  );
+
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
+
+<Callout type="info">
+ライブラリ内のすべてのコンポーネントに対してaxe-coreテストを実行してください。各コンポーネントを一般的な設定でレンダリングし、違反ゼロをアサートする共有テストユーティリティを作成しましょう。
+</Callout>
+
+### 共有a11yテストユーティリティ
+
+```tsx
+// test-utils/a11y.ts
+import { render, RenderResult } from "@testing-library/react";
+import { axe, toHaveNoViolations } from "vitest-axe";
+
+expect.extend(toHaveNoViolations);
+
+/**
+ * コンポーネントをレンダリングし、axe-core違反がないことをアサートします。
+ * @param ui - テストするReact要素。
+ * @returns 必要に応じてさらに検査するためのaxe結果。
+ * @example
+ * await assertNoA11yViolations(<Button>Click me</Button>);
+ */
+export async function assertNoA11yViolations(ui: React.ReactElement) {
+  const { container } = render(ui);
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+  return results;
+}
+```
+
+## ビジュアルリグレッションテスト
+
+ビジュアルテストは、動作テストでは検出できないレンダリングの問題（スペーシング、配置、オーバーフロー、フォントレンダリング）をキャッチしてユニットテストを補完します：
+
+```tsx
+// tests/visual/components.spec.ts
+import { test, expect } from "@playwright/test";
+
+const components = [
+  { name: "slider-horizontal", id: "advanced-slider--horizontal" },
+  { name: "slider-disabled", id: "advanced-slider--disabled" },
+  { name: "number-field-default", id: "advanced-numberfield--default" },
+  { name: "toast-success", id: "advanced-toast--success" },
+];
+
+for (const { name, id } of components) {
+  test(`visual: ${name}`, async ({ page }) => {
+    await page.goto(`http://localhost:6006/iframe.html?id=${id}`);
+    await page.waitForLoadState("networkidle");
+    await expect(page).toHaveScreenshot(`${name}.png`);
+  });
+}
+```
+
+`pnpm playwright test --update-snapshots` でベースラインを作成し、以降の実行で比較します。
+
+## テストスクリプト
+
+```json
+{
+  "scripts": {
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "test:a11y": "vitest --grep 'accessibility'",
+    "test:visual": "playwright test",
+    "test:all": "pnpm test && pnpm test:visual"
+  }
+}
+```
+
+## npmへの公開
+
+### セマンティックバージョニング
+
+npmはバージョン番号に[semver](https://semver.org/)を使用します：`MAJOR.MINOR.PATCH`。
+
+| インクリメント | 条件 | 例 |
+|-----------|------|---------|
+| **MAJOR** | 破壊的API変更 | propのリネーム、コンポーネントの削除 | `1.0.0` から `2.0.0` |
+| **MINOR** | 新機能（後方互換性あり） | 新しいコンポーネントの追加 | `1.0.0` から `1.1.0` |
+| **PATCH** | バグ修正（後方互換性あり） | キーボードハンドラの修正 | `1.0.0` から `1.0.1` |
+
+<Callout type="warning">
+ヘッドレスコンポーネントライブラリのAPI表面には、コンポーネント名、prop名、prop型、データ属性、CSSカスタムプロパティ、ARIA属性の動作が含まれます。コンシューマーのコードを壊す可能性のあるこれらの変更は、**メジャー**バージョンバンプです。
+</Callout>
+
+### バージョン管理のためのChangesets
+
+[Changesets](https://github.com/changesets/changesets)は、バージョンバンプとchangelog生成を自動化します。各変更に「changeset」 — 変更内容とsemverへの影響を記述するMarkdownファイル — が付きます：
+
+```bash
+pnpm add -D @changesets/cli
+pnpm changeset init
+```
+
+変更を加えたら、changesetを作成します：
+
+```bash
+pnpm changeset
+```
+
+これにより、パッケージ、バージョンバンプの種類、説明を求めるプロンプトが表示されます。`.changeset/` にファイルが作成されます：
+
+```md
+---
+"@mylib/ui": minor
+---
+
+Added Slider component with full ARIA slider pattern, keyboard navigation, and CSS custom property support.
+```
+
+リリース準備ができたら：
+
+```bash
+pnpm changeset version   # changesetsに基づいてバージョンをバンプ
+pnpm changeset publish   # npmに公開
+```
+
+### 自動生成されるCHANGELOG
+
+Changesetsは自動的に `CHANGELOG.md` を生成します：
+
+```md
+# @mylib/ui
+
+## 1.3.0
+
+### Minor Changes
+
+- Added Slider component with full ARIA slider pattern, keyboard navigation, and CSS custom property support.
+- Added NumberField component with spinbutton role and increment/decrement buttons.
+
+### Patch Changes
+
+- Fixed Tabs component not forwarding aria-orientation to tablist.
+```
+
+## CI/CDパイプライン
+
+GitHub Actionsでテストと公開を自動化します：
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  publish:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Create Release Pull Request or Publish
+        uses: changesets/action@v1
+        with:
+          publish: pnpm changeset publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+`changesets/action` GitHub Actionは2つのことを行います：
+
+1. **changesetsが存在する場合**：バージョンをバンプしchangelogを更新する「Version Packages」PRを開きます。
+2. **そのPRがマージされた場合**：新しいバージョンをnpmに公開します。
+
+## プレリリースワークフロー
+
+未リリースバージョンのテスト用に、changesetsはプレリリースチャネルをサポートしています：
+
+```bash
+pnpm changeset pre enter beta    # プレリリースモードに入る
+pnpm changeset version           # 1.3.0-beta.0 を生成
+pnpm changeset publish           # betaタグで公開
+pnpm changeset pre exit          # プレリリースモードを終了
+```
+
+コンシューマーはベータ版をインストールできます：
+
+```bash
+pnpm add @mylib/ui@beta
+```
+
+## 出自証明とセキュリティ
+
+npmは[出自証明](https://docs.npmjs.com/generating-provenance-statements)をサポートしており、公開されたパッケージをそのソースコードとビルドプロセスに暗号的にリンクします：
+
+```yaml
+- run: pnpm changeset publish --provenance
+  env:
+    NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+```
+
+これにより、パッケージがリポジトリ内の特定のコミットからビルドされたことの検証可能な証拠をコンシューマーに提供します。
+
+## 公開前チェックリスト
+
+初回公開の前に確認：
+
+- [ ] `package.json` に正しい `name`、`version`、`exports`、`peerDependencies` がある
+- [ ] `sideEffects: false` が設定されている
+- [ ] `files` フィールドに `dist/` のみ含まれている（ソース/テストファイルの出荷を回避）
+- [ ] `pnpm build` が期待されるすべての出力ファイルを生成する
+- [ ] TypeScript宣言が正しく解決される
+- [ ] すべてのテストがパスする：`pnpm test && pnpm test:visual`
+- [ ] `pnpm publint` が問題なしを報告する
+- [ ] `README.md` にインストールと基本的な使用方法の手順がある
+- [ ] `LICENSE` ファイルが存在する
+
+```json
+{
+  "files": ["dist", "README.md", "LICENSE"]
+}
+```
+
+## 重要なポイント
+
+1. **ユニットテスト**はTesting Libraryを使って動作、ARIA属性、キーボード操作をカバーします。
+2. **axe-core**は自動アクセシビリティ違反を検出します — すべてのコンポーネントで実行してください。
+3. **ビジュアルリグレッションテスト**（Playwright）は動作テストでは見逃すレンダリングの問題を検出します。
+4. **セマンティックバージョニング**は各変更の影響をコンシューマーに伝えます。
+5. **Changesets**はバージョンバンプ、changelog生成、リリースワークフロー全体を自動化します。
+6. **GitHub ActionsによるCI/CD**により、すべての変更がnpmに届く前にテストされます。
+7. **出自証明**はパッケージのビルド元の暗号的証拠をコンシューマーに提供します。

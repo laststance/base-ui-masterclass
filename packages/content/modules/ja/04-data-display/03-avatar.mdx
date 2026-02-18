@@ -1,0 +1,261 @@
+---
+title: "Avatarコンポーネントの構築"
+description: "画像、イニシャル、アイコンという優雅なフォールバックチェーンを持つAvatarコンポーネントの構築方法を学びます。AvatarImage + AvatarFallbackのCompound Componentパターンを使用します。"
+order: 3
+isFree: false
+---
+
+# Avatarコンポーネントの構築
+
+**Avatar**コンポーネントは、ユーザーの表現を表示します — 通常はプロフィール写真、イニシャル、または汎用アイコンです。課題は画像をレンダリングすることではなく、画像の読み込みに失敗した場合や利用できない場合に**フォールバックチェーン**を優雅に処理することです。
+
+## フォールバックチェーン
+
+適切に設計されたAvatarは、3段階のフォールバック戦略を実装します：
+
+1. **画像** — 優先される表現。ユーザーのプロフィール写真を読み込む。
+2. **イニシャル** — 画像が失敗した場合または提供されていない場合、ユーザーのイニシャルを表示。
+3. **アイコン** — 最後の手段としての汎用人物アイコン。
+
+```
+画像（優先）
+  └─ 失敗 → イニシャル（名前から導出）
+                └─ 名前なし → 汎用アイコン（常に利用可能）
+```
+
+このチェーンはユーザーに対して透過的でなければなりません。画像が正常に読み込まれた場合は即座に表示します。失敗した場合は、ちらつきやレイアウトシフトなくフォールバックに移行します。
+
+## 画像の読み込み状態
+
+画像の読み込み管理がAvatarの核心的な複雑さです。画像は3つの状態のいずれかにあります：
+
+| 状態 | 説明 | 表示するもの |
+|------|------|-------------|
+| `loading` | 画像リクエスト進行中 | フォールバック（空白を避けるため） |
+| `loaded` | 画像の読み込み成功 | 画像 |
+| `error` | 画像の読み込み失敗 | フォールバック |
+
+この状態をカスタムhookで追跡します：
+
+```tsx
+type ImageLoadingStatus = "loading" | "loaded" | "error";
+
+function useImageLoadingStatus(src: string | undefined): ImageLoadingStatus {
+  const [status, setStatus] = React.useState<ImageLoadingStatus>("loading");
+
+  React.useEffect(() => {
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+
+    setStatus("loading");
+    const img = new Image();
+    img.onload = () => setStatus("loaded");
+    img.onerror = () => setStatus("error");
+    img.src = src;
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [src]);
+
+  return status;
+}
+```
+
+## Compound Componentパターン: AvatarImage + AvatarFallback
+
+Avatarは3つのパーツからなるCompound Componentパターンを使用します：
+
+- **`Avatar.Root`** — 読み込み状態のcontextを提供するコンテナ。
+- **`Avatar.Image`** — 読み込み完了時にのみ`<img>`要素をレンダリング。
+- **`Avatar.Fallback`** — 画像が読み込まれていない時にのみレンダリング。
+
+このパターンにより、利用者はフォールバックの見た目を完全に制御できます：
+
+```tsx
+<Avatar.Root>
+  <Avatar.Image src={user.avatarUrl} alt={user.name} />
+  <Avatar.Fallback>
+    {user.name ? getInitials(user.name) : <PersonIcon />}
+  </Avatar.Fallback>
+</Avatar.Root>
+```
+
+## 遅延フォールバック
+
+高速な接続を持つユーザーの場合、画像が読み込まれる前にフォールバックが一瞬表示されると不快なちらつきが生じます。Fallbackコンポーネントに`delayMs` propを追加して、タイムアウトが経過するまで表示を防ぐことができます：
+
+```tsx
+function Fallback({
+  delayMs = 0,
+  children,
+  ...props
+}: { delayMs?: number } & React.ComponentPropsWithoutRef<"span">) {
+  const { status } = useAvatarContext();
+  const [canRender, setCanRender] = React.useState(delayMs === 0);
+
+  React.useEffect(() => {
+    if (delayMs > 0) {
+      const timer = setTimeout(() => setCanRender(true), delayMs);
+      return () => clearTimeout(timer);
+    }
+  }, [delayMs]);
+
+  if (status === "loaded" || !canRender) return null;
+
+  return <span data-state="visible" {...props}>{children}</span>;
+}
+```
+
+`delayMs={600}`とすると、フォールバックは600ms後にのみ表示され、通常の接続で画像が読み込まれるのに十分な時間を確保します。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+type ImageLoadingStatus = "loading" | "loaded" | "error";
+
+interface AvatarContextValue {
+  status: ImageLoadingStatus;
+}
+
+const AvatarContext = React.createContext<AvatarContextValue | null>(null);
+
+function useAvatarContext() {
+  const ctx = React.useContext(AvatarContext);
+  if (!ctx) throw new Error("Avatar sub-components must be used within Avatar.Root");
+  return ctx;
+}
+
+function useImageLoadingStatus(src: string | undefined): ImageLoadingStatus {
+  const [status, setStatus] = React.useState<ImageLoadingStatus>("loading");
+
+  React.useEffect(() => {
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+
+    setStatus("loading");
+    const img = new window.Image();
+    img.onload = () => setStatus("loaded");
+    img.onerror = () => setStatus("error");
+    img.src = src;
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [src]);
+
+  return status;
+}
+
+function Root({ children, ...props }: React.ComponentPropsWithoutRef<"span">) {
+  // ステータスはAvatarImageが管理、Imageが使用されない場合はフォールバックを表示するため"error"をデフォルトに
+  const [status, setStatus] = React.useState<ImageLoadingStatus>("error");
+
+  const ctx = React.useMemo(() => ({ status, setStatus }), [status]);
+
+  return (
+    <AvatarContext value={{ status }}>
+      <span data-state={status} {...props}>
+        {children}
+      </span>
+    </AvatarContext>
+  );
+}
+
+function AvatarImage({
+  src,
+  alt = "",
+  ...props
+}: React.ComponentPropsWithoutRef<"img">) {
+  const { status } = useAvatarContext();
+  const imageStatus = useImageLoadingStatus(src);
+
+  // 画像が読み込まれた時のみレンダリング
+  if (imageStatus !== "loaded") return null;
+
+  return <img src={src} alt={alt} data-state={imageStatus} {...props} />;
+}
+
+function Fallback({
+  delayMs = 0,
+  children,
+  ...props
+}: { delayMs?: number } & React.ComponentPropsWithoutRef<"span">) {
+  const { status } = useAvatarContext();
+  const [canRender, setCanRender] = React.useState(delayMs === 0);
+
+  React.useEffect(() => {
+    if (delayMs > 0) {
+      const timer = setTimeout(() => setCanRender(true), delayMs);
+      return () => clearTimeout(timer);
+    }
+  }, [delayMs]);
+
+  if (status === "loaded" || !canRender) return null;
+
+  return <span data-state="visible" {...props}>{children}</span>;
+}
+
+export const Avatar = { Root, Image: AvatarImage, Fallback };
+```
+
+## イニシャルの生成
+
+名前からイニシャルを抽出する小さなユーティリティ関数：
+
+```tsx
+/**
+ * フルネームから最大2文字のイニシャルを抽出します。
+ * @param name - ユーザーの表示名
+ * @returns 大文字のイニシャル文字列
+ * @example
+ * getInitials("John Doe")    // => "JD"
+ * getInitials("Alice")       // => "A"
+ * getInitials("Ana Maria C") // => "AC"
+ */
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+```
+
+## アクセシビリティに関する考慮事項
+
+- `Avatar.Image`には常に意味のある`alt`属性を提供してください。
+- イニシャルを表示する場合、ルートに`aria-label`を追加して、スクリーンリーダーが文字だけでなくフルネームを読み上げるようにすることを検討してください。
+- Avatarが純粋に装飾的な場合（例：ユーザー名の隣に表示）、ルートに`aria-hidden="true"`を使用して冗長な読み上げを避けてください。
+
+```tsx
+// 情報提供的なAvatar（隣にユーザー名がない）
+<Avatar.Root aria-label="John Doe">
+  <Avatar.Image src="/john.jpg" alt="John Doe" />
+  <Avatar.Fallback>JD</Avatar.Fallback>
+</Avatar.Root>
+
+// 装飾的なAvatar（隣にユーザー名が表示されている）
+<div className="user-card">
+  <Avatar.Root aria-hidden="true">
+    <Avatar.Image src="/john.jpg" alt="" />
+    <Avatar.Fallback>JD</Avatar.Fallback>
+  </Avatar.Root>
+  <span>John Doe</span>
+</div>
+```
+
+## 重要なポイント
+
+1. **フォールバックチェーン**（画像、イニシャル、アイコン）が優雅なデグラデーションパスを提供する。
+2. **画像の読み込み状態を追跡**する — `Image()`コンストラクタを使用したカスタムhookで実現。
+3. **AvatarImageは読み込み完了時にのみレンダリング**し、壊れた画像アイコンを防ぐ。
+4. **AvatarFallbackは`delayMs`をサポート**し、高速接続でのちらつきを回避する。
+5. **Compound Component**により、利用者は画像とフォールバックコンテンツの両方を制御できる。
+6. **装飾的なAvatarには`aria-hidden`を検討**する — ユーザー名の隣に表示される場合。

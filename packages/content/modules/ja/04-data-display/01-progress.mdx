@@ -1,0 +1,186 @@
+---
+title: "Progressコンポーネントの構築"
+description: "role='progressbar'、ARIA値属性、そして柔軟なスタイリングのためのCSSカスタムプロパティを使って、アクセシブルなProgressインジケータを構築する方法を学びます。"
+order: 1
+isFree: false
+---
+
+# Progressコンポーネントの構築
+
+**Progress**コンポーネントは、タスクの完了状況をユーザーに伝えます。データ表示コンポーネントの中でも最もシンプルなものの一つですが、アクセシビリティを正しく実装することが不可欠です。スクリーンリーダーは進捗の変化を通知するために特定のARIA属性に依存しており、CSSカスタムプロパティによって利用者はビジュアルの外観を完全に制御できます。
+
+## ネイティブの`<progress>`要素
+
+HTMLにはビルトインの`<progress>`要素がありますが、ブラウザ間で一貫したスタイリングを行うのは非常に困難です。各ブラウザが独自の内部Shadow DOM構造を適用するため、CSSだけでカスタムな見た目を実現するのはほぼ不可能です。これこそがヘッドレスアプローチが適している理由です。正しいARIAセマンティクスを持つ`<div>`をレンダリングし、スタイリングは利用者に完全に委ねます。
+
+## Progress用のARIA属性
+
+WAI-ARIA仕様は、`progressbar`ロールに対して3つの主要な属性を定義しています：
+
+| 属性 | 目的 | 例 |
+|------|------|-----|
+| `role="progressbar"` | 支援技術にこれが進捗インジケータであることを伝える | 常に付与 |
+| `aria-valuenow` | 進捗の現在値 | `50` |
+| `aria-valuemin` | 最小値（範囲の始点） | `0` |
+| `aria-valuemax` | 最大値（範囲の終点） | `100` |
+| `aria-label` | 人間が読めるラベル | `"Uploading file"` |
+
+進捗が**不定（indeterminate）**の場合（例：完了率が不明なローディングスピナー）は、`aria-valuenow`を完全に省略します。これにより、スクリーンリーダーに操作が進行中だが完了率は不明であることを伝えます。
+
+```tsx
+// 確定的：60%完了であることがわかっている
+<div role="progressbar" aria-valuenow={60} aria-valuemin={0} aria-valuemax={100}>
+  60%
+</div>
+
+// 不定的：完了率が不明
+<div role="progressbar" aria-valuemin={0} aria-valuemax={100}>
+  Loading...
+</div>
+```
+
+## コンポーネントAPIの設計
+
+ヘッドレスなProgressコンポーネントは、Compound Componentパターンに従い2つのサブコンポーネントを公開します：
+
+- **`Progress.Root`** — ARIA属性を持つ外側のコンテナ。
+- **`Progress.Indicator`** — 現在の値を表すビジュアルフィル。
+
+```tsx
+interface ProgressProps {
+  value?: number | null;  // null = 不定
+  min?: number;           // デフォルト: 0
+  max?: number;           // デフォルト: 100
+}
+```
+
+`value`が`null`または`undefined`の場合、コンポーネントは不定モードに入ります。
+
+## スタイリングフックとしてのCSSカスタムプロパティ
+
+インラインスタイルを直接適用する代わりに、ルート要素にCSSカスタムプロパティ`--progress-value`を公開します。これにより、利用者は特定のCSSフレームワークに結合することなく、自身のスタイルシートで使用できます。
+
+```tsx
+function ProgressRoot({ value, min = 0, max = 100, children, ...props }) {
+  const percentage = value != null
+    ? Math.round(((value - min) / (max - min)) * 100)
+    : null;
+
+  return (
+    <div
+      role="progressbar"
+      aria-valuenow={value ?? undefined}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      data-state={value == null ? "indeterminate" : "determinate"}
+      style={{ "--progress-value": percentage != null ? `${percentage}%` : undefined } as React.CSSProperties}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+利用者はこのようなCSSを書くことができます：
+
+```css
+.progress-indicator {
+  width: var(--progress-value, 0%);
+  transition: width 300ms ease;
+}
+```
+
+## ステート用のdata属性
+
+Base UIの規約に従い、JavaScriptによるクラス切り替えなしでCSS限定のスタイリングを可能にする`data-state`を公開します：
+
+- `data-state="determinate"` — 具体的な値が提供されている場合。
+- `data-state="indeterminate"` — 値が不明な場合。
+
+このパターンはすべてのBase UIコンポーネントで一貫しており、利用者は以下のようなセレクタを書くことができます：
+
+```css
+[data-state="indeterminate"] .progress-indicator {
+  animation: indeterminate-pulse 1.5s infinite;
+}
+```
+
+## 実装のウォークスルー
+
+Progressコンポーネントの完全な実装は以下の通りです：
+
+```tsx
+import * as React from "react";
+
+interface ProgressContextValue {
+  value: number | null;
+  min: number;
+  max: number;
+  percentage: number | null;
+}
+
+const ProgressContext = React.createContext<ProgressContextValue | null>(null);
+
+function useProgressContext() {
+  const ctx = React.useContext(ProgressContext);
+  if (!ctx) throw new Error("Progress sub-components must be used within Progress.Root");
+  return ctx;
+}
+
+function Root({
+  value = null,
+  min = 0,
+  max = 100,
+  children,
+  ...props
+}: ProgressProps & React.ComponentPropsWithoutRef<"div">) {
+  const percentage = value != null
+    ? Math.round(((value - min) / (max - min)) * 100)
+    : null;
+
+  const ctx = React.useMemo(() => ({ value, min, max, percentage }), [value, min, max, percentage]);
+
+  return (
+    <ProgressContext value={ctx}>
+      <div
+        role="progressbar"
+        aria-valuenow={value ?? undefined}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        data-state={value == null ? "indeterminate" : "determinate"}
+        style={{ "--progress-value": percentage != null ? `${percentage}%` : undefined } as React.CSSProperties}
+        {...props}
+      >
+        {children}
+      </div>
+    </ProgressContext>
+  );
+}
+
+function Indicator(props: React.ComponentPropsWithoutRef<"div">) {
+  const { percentage } = useProgressContext();
+
+  return (
+    <div
+      data-state={percentage == null ? "indeterminate" : "determinate"}
+      style={{ width: percentage != null ? `${percentage}%` : undefined }}
+      {...props}
+    />
+  );
+}
+
+export const Progress = { Root, Indicator };
+```
+
+## 重要なポイント
+
+1. **`role="progressbar"`を使用**し、確定的な進捗には`aria-valuenow`、`aria-valuemin`、`aria-valuemax`を設定する。
+2. **不定状態では`aria-valuenow`を省略**し、スクリーンリーダーが「0%」ではなく「読み込み中」と通知するようにする。
+3. **CSSカスタムプロパティ**（`--progress-value`など）を公開し、スタイリングをコンポーネント内部から分離する。
+4. **`data-state`属性**を使い、JavaScriptなしでCSS限定の条件付きスタイリングを実現する。
+5. **パーセンテージの計算とクランプ**を内部で行い、利用者は生の値を渡すだけで済むようにする。
+
+## 実践してみよう
+
+<Exercise id="progress-basic" />

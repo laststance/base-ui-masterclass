@@ -1,0 +1,255 @@
+---
+title: "ディスクロージャー用CSSトランジション戦略"
+description: "ディスクロージャーコンポーネントのためのCSSトランジション技法をマスターします。CSSグリッドトリック、max-heightアプローチ、そして退出アニメーション用のTransitionコンポーネントを解説します。"
+order: 3
+isFree: false
+---
+
+# ディスクロージャー用CSSトランジション戦略
+
+ディスクロージャーコンポーネントの開閉状態をアニメーションさせることは、最も一般的なUI課題の一つです。難しさは`auto`の高さへの、または`auto`の高さからのアニメーションにあり、CSSトランジションはこれをネイティブにサポートしていません。このレッスンでは、それぞれ異なるトレードオフを持つ3つのアプローチを探ります。
+
+## 戦略1: CSSグリッドトリック
+
+これはモダンで推奨されるアプローチです。CSSグリッドの`fr`単位がトランジション可能であることを利用します。
+
+```css
+.content-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms ease-out;
+}
+
+.content-wrapper[data-state="open"] {
+  grid-template-rows: 1fr;
+}
+
+.content-inner {
+  overflow: hidden;
+}
+```
+
+```tsx
+<div className="content-wrapper" data-state={open ? "open" : "closed"}>
+  <div className="content-inner">
+    {children}
+  </div>
+</div>
+```
+
+### 仕組み
+
+1. 外側のコンテナは単一行のグリッド。
+2. `grid-template-rows: 0fr`で行の最小高さを`0`にし、折りたたむ。
+3. `grid-template-rows: 1fr`で行をコンテンツの自然な高さにする。
+4. CSSトランジションが`grid-template-rows`プロパティをスムーズにアニメーション。
+5. `overflow: hidden`を持つ内側の`<div>`がトランジション中にコンテンツをクリッピング。
+
+### メリットとデメリット
+
+| メリット | デメリット |
+|----------|-----------|
+| 純粋なCSSでJavaScript計測不要 | ラッパー`<div>`が必要 |
+| コンテンツの正確な高さにアニメーション | ブラウザサポート：Chrome 107+、Firefox 66+、Safari 16+ |
+| 自然なイージングカーブ | アニメーション中に`hidden`属性を使用できない |
+| ハードコードされた値が不要 | やや複雑なDOM構造 |
+
+## 戦略2: max-heightアプローチ
+
+CSSグリッドトリック以前は、`max-height`が定番のワークアラウンドでした：
+
+```css
+.content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 300ms ease-out;
+}
+
+.content[data-state="open"] {
+  max-height: 500px; /* 実際のコンテンツより大きくする必要がある */
+}
+```
+
+### max-heightの問題点
+
+根本的な問題は、最大値を推測しなければならないことです。これにより2つの問題が生じます：
+
+1. **`max-height`が小さすぎる場合**、コンテンツが切り取られる。
+2. **`max-height`が大きすぎる場合**、ブラウザが`500px`から実際のコンテンツの高さ（例えば`200px`）にトランジションするため、イージングカーブがおかしくなる — トランジションの最初の`300px`は一瞬で起き、可視のアニメーションは最後の部分だけになる。
+
+```
+max-height: 500px → コンテンツは200px
+
+タイムライン: [=========|---可視アニメーション---]
+              不可視      可視（約40%のみ）
+```
+
+これにより、開く時は「遅延開始」効果、閉じる時は「早期終了」効果が生じ、洗練されていない印象になります。
+
+### max-heightを使うべき場面
+
+欠点があるにもかかわらず、`max-height`には有効なユースケースがあります：
+
+- コンテンツの高さが特定の値を超えないことがわかっている場合。
+- Chrome 107 / Safari 16より古いブラウザをサポートする場合。
+- 予測可能なコンテンツを持つシンプルなツールチップやドロップダウンの場合。
+
+## 戦略3: 退出アニメーション用のTransitionコンポーネント
+
+ディスクロージャーアニメーションの最も難しい部分は**退出トランジション**です。コンテンツが閉じる際、以下が必要です：
+
+1. 閉じるアニメーションを開始する。
+2. アニメーションの完了を待つ。
+3. **その後**コンテンツをDOMから削除する（または`hidden`を設定する）。
+
+コンテンツを即座に削除すると、アニメーションは再生されません。Transitionコンポーネントは、アニメーションのライフサイクルを追跡することでこれを解決します：
+
+```tsx
+type TransitionState = "entering" | "entered" | "exiting" | "exited";
+
+function useTransitionState(open: boolean, duration: number): TransitionState {
+  const [state, setState] = React.useState<TransitionState>(
+    open ? "entered" : "exited",
+  );
+
+  React.useEffect(() => {
+    if (open) {
+      setState("entering");
+      const raf = requestAnimationFrame(() => {
+        // リフローを強制し、enteredにトランジション
+        setState("entered");
+      });
+      return () => cancelAnimationFrame(raf);
+    } else {
+      setState("exiting");
+      const timer = setTimeout(() => setState("exited"), duration);
+      return () => clearTimeout(timer);
+    }
+  }, [open, duration]);
+
+  return state;
+}
+```
+
+### Transitionコンポーネントの構築
+
+```tsx
+interface TransitionProps {
+  open: boolean;
+  duration?: number;
+  children: (state: TransitionState) => React.ReactNode;
+}
+
+function Transition({ open, duration = 300, children }: TransitionProps) {
+  const state = useTransitionState(open, duration);
+
+  // 完全に退出した場合はレンダリングしない
+  if (state === "exited" && !open) return null;
+
+  return <>{children(state)}</>;
+}
+```
+
+ディスクロージャーコンテンツでの使用例：
+
+```tsx
+<Transition open={isOpen} duration={300}>
+  {(state) => (
+    <div
+      className="panel"
+      style={{
+        transition: "opacity 300ms, transform 300ms",
+        opacity: state === "entered" ? 1 : 0,
+        transform: state === "entered" ? "translateY(0)" : "translateY(-8px)",
+      }}
+    >
+      {content}
+    </div>
+  )}
+</Transition>
+```
+
+### トランジションのライフサイクル
+
+```
+開くリクエスト：   exited → entering → entered
+閉じるリクエスト： entered → exiting → exited（duration経過後）
+```
+
+重要なポイントは、`exiting`がCSSアニメーションの再生中に要素をマウントしたまま保持することです。`duration`が経過した後にのみ、状態が`exited`に変わり要素がアンマウントされます。
+
+## 戦略の組み合わせ
+
+実際には、CSSグリッドトリックとTransitionコンポーネントを組み合わせて使うことが多いです：
+
+- **CSSグリッド**が高さのアニメーションを処理。
+- **Transition**が退出アニメーション中にコンテンツをマウントしたまま保持。
+
+```tsx
+function AnimatedPanel({ open, children }) {
+  const state = useTransitionState(open, 300);
+  const shouldMount = state !== "exited";
+
+  if (!shouldMount) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateRows: state === "entered" ? "1fr" : "0fr",
+        transition: "grid-template-rows 300ms ease",
+      }}
+    >
+      <div style={{ overflow: "hidden" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+## ユーザー設定の尊重
+
+`prefers-reduced-motion`メディアクエリを常に尊重してください。モーション低減を好むユーザーは、アニメーションによって不快感、吐き気、または発作を経験する可能性があります：
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  .content-wrapper {
+    transition: none;
+  }
+}
+```
+
+JavaScriptでこの設定を検出することもできます：
+
+```tsx
+function usePrefersReducedMotion(): boolean {
+  return React.useSyncExternalStore(
+    (cb) => {
+      const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+      mql.addEventListener("change", cb);
+      return () => mql.removeEventListener("change", cb);
+    },
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    () => false, // SSRフォールバック
+  );
+}
+```
+
+## 比較表
+
+| 戦略 | autoへのアニメーション? | 退出アニメーション? | ブラウザサポート | 複雑さ |
+|------|----------------------|-------------------|----------------|--------|
+| CSSグリッドトリック | はい | いいえ（ヘルパーが必要） | モダン | 低 |
+| max-height | いいえ（推測値） | はい（ビルトイン） | 全ブラウザ | 低 |
+| Transitionコンポーネント | CSSに依存 | はい | 全ブラウザ | 中 |
+| グリッド + Transition | はい | はい | モダン | 中 |
+
+## 重要なポイント
+
+1. **CSSグリッドトリック**は、モダンブラウザで高さを`auto`にアニメーションする最良のアプローチ。
+2. **max-height**はどこでも動作するが、ハードコードされた値によるイージングカーブの問題がある。
+3. **Transitionコンポーネント**がアンマウントを遅延させることで退出アニメーションの問題を解決。
+4. **グリッド + Transitionの組み合わせ**で両方の長所を得られる。
+5. **`prefers-reduced-motion`を常に尊重**してアクセシビリティを確保する。
+6. **`requestAnimationFrame`**がenteringの状態でリペイントを強制し、CSSトランジションを確実にトリガーする。

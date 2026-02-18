@@ -1,0 +1,173 @@
+---
+title: "ヘッドレスButtonの構築"
+description: "render propによるコンポジション、React 19のref転送、スタイリングフックとしてのdata属性、ポリモーフィックレンダリングを備えたヘッドレスButtonコンポーネントの構築方法を学びます。"
+order: 1
+isFree: false
+---
+
+# ヘッドレスButtonの構築
+
+Buttonは最もシンプルなヘッドレスプリミティブですが、このコース全体で使用するすべてのコアコンセプトを導入します：**render prop**、**ref転送**、**data属性**、そして**ポリモーフィックレンダリング**です。
+
+## なぜヘッドレスButtonが必要なのか？
+
+ネイティブの`<button>`はクリックイベントやキーボード操作をすでに処理しています。ではなぜラップするのでしょうか？
+
+1. **一貫したdata属性** -- `data-disabled`、`data-pressed`などを公開し、JavaScriptによるクラス切り替えなしでCSSからステートをスタイリングできます。
+2. **ポリモーフィックレンダリング** -- 「ボタン」が実際には`<a>`やNext.jsの`<Link>`、React Routerの`<NavLink>`であることがあります。render propはこれをシームレスに実現します。
+3. **propsの正規化** -- 非button要素をレンダリングする際、`disabled`に加えて`aria-disabled`も設定されるようにします（アンカー要素は`disabled`属性をサポートしません）。
+
+## ステップ1: Propsインターフェースの定義
+
+```tsx
+import * as React from "react";
+
+interface ButtonProps extends React.ComponentPropsWithoutRef<"button"> {
+  /**
+   * ポリモーフィックレンダリング用のオプショナルなrender prop。
+   * ReactElement（例: <a />）を渡すと、Buttonは
+   * 計算されたpropsでそれをcloneします。
+   */
+  render?: React.ReactElement;
+}
+```
+
+`ComponentPropsWithoutRef<"button">`を継承しているため、利用者はネイティブbutton属性の完全なIntelliSenseを得られます。`render` propは、ボタンのマージされたpropsでcloneされるReact要素を受け取ります。
+
+## ステップ2: コンポーネントの実装
+
+```tsx
+export function Button({ render, disabled, ...props }: ButtonProps) {
+  // CSSスタイリングフック用のdata属性を計算
+  const dataAttributes = {
+    "data-disabled": disabled || undefined,
+  };
+
+  // すべてを1つのpropsオブジェクトにマージ
+  const elementProps = {
+    ...props,
+    disabled,
+    ...dataAttributes,
+  };
+
+  // render propが指定されている場合、計算されたpropsでclone
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  // デフォルト: ネイティブの<button>をレンダリング
+  return <button {...elementProps} />;
+}
+```
+
+### 主な設計判断
+
+| 判断 | 理由 |
+|------|------|
+| `data-disabled`で`\|\| undefined`を使用 | `undefined`に設定された属性はDOMから完全に省略され、マークアップがクリーンに保たれる |
+| render関数ではなく`React.cloneElement` | Base UIのパターンに一致 -- 利用者は関数ではなく要素を渡す |
+| `forwardRef`ラッパーなし | React 19では`ref`は通常のpropとして渡されるため、ラッパーは不要 |
+
+## ステップ3: React 19のRef転送
+
+React 19では、`ref`は単なるもう1つのpropです。`forwardRef`は不要です：
+
+```tsx
+export function Button({ render, disabled, ref, ...props }: ButtonProps) {
+  const elementProps = {
+    ...props,
+    ref,
+    disabled,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+propsの型を更新して`ref`を含めます：
+
+```tsx
+interface ButtonProps extends React.ComponentPropsWithoutRef<"button"> {
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+これがReact 19のやり方です。`ref`は他のpropと同様に流れ、利用者は通常通りアタッチします：
+
+```tsx
+function App() {
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
+  return <Button ref={buttonRef}>Click me</Button>;
+}
+```
+
+## ステップ4: ポリモーフィックレンダリングの実践
+
+render propにより、任意の要素を「ボタン」としてレンダリングできます：
+
+```tsx
+// リンクとして
+<Button render={<a href="/dashboard" />}>Go to Dashboard</Button>
+
+// Next.js Linkで
+<Button render={<Link href="/settings" />}>Settings</Button>
+
+// React Router NavLinkで
+<Button render={<NavLink to="/profile" />}>Profile</Button>
+```
+
+非`<button>`要素をレンダリングする際は、アクセシビリティも考慮する必要があります。ネイティブの`<a>`要素は`disabled`属性をサポートしないため、代わりに`aria-disabled`を使用します：
+
+```tsx
+export function Button({ render, disabled, ref, ...props }: ButtonProps) {
+  const isNativeButton = !render;
+
+  const elementProps = {
+    ...props,
+    ref,
+    "data-disabled": disabled || undefined,
+    ...(isNativeButton
+      ? { disabled }
+      : { "aria-disabled": disabled || undefined }),
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+## ステップ5: スタイリングフックとしてのData属性
+
+Data属性はヘッドレスUIの秘密兵器です。`className`文字列を渡す代わりに、DOM経由でステートを公開します：
+
+```css
+/* data属性に基づいてボタンをスタイリング */
+.my-button[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+このパターンは美しくスケールします。コンポーネントがより複雑になるにつれ（Switch、Checkbox、Dialog）、`data-checked`、`data-open`、`data-pressed`などのdata属性が主要なスタイリングAPIになります。
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| Render prop | ユーザー提供の要素を計算されたpropsでclone |
+| React 19のref | `ref`を通常のpropとして渡す -- `forwardRef`不要 |
+| Data属性 | クラス名propsなしでコンポーネントのステートをCSSに公開 |
+| ポリモーフィックレンダリング | 1つのコンポーネント、任意のHTML要素 |
+
+この4つのパターンはすべてのBase UIコンポーネントのDNAです。ここでマスターすれば、コースの残りは自然とその上に構築されます。
+
+<Exercise id="button-basic" />

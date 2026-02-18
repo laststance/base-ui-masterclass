@@ -1,0 +1,368 @@
+---
+title: "Tabsコンポーネントの構築"
+description: "role='tablist'、Roving Tabindexの統合、遅延レンダリングと即時レンダリングのパネル戦略を備えた、アクセシブルなTabsコンポーネントの構築方法を学びます。"
+order: 2
+isFree: false
+---
+
+# Tabsコンポーネントの構築
+
+**Tabs**はコンテンツを複数のパネルに整理し、一度に1つのパネルのみを表示します。ユーザーがタブを選択すると、対応するパネルが表示されます。TabsはWebで最も一般的に使用されるナビゲーションパターンの一つであり、ARIAセマンティクスを正しく実装することはスクリーンリーダーユーザーにとって非常に重要です。
+
+## Tabs用のARIAロール
+
+WAI-ARIA仕様は、タブインターフェースに対して正確なロールセットを定義しています：
+
+| 要素 | ロール | 目的 |
+|------|--------|------|
+| タブコンテナ | `tablist` | タブ要素をグループ化 |
+| 各タブ | `tab` | リスト内の選択可能なタブ |
+| 各コンテンツ領域 | `tabpanel` | タブに関連付けられたコンテンツ |
+
+これらのロールにより、スクリーンリーダーが「タブ 2/4、選択中」や「タブパネル」と読み上げるためのセマンティックな関係が構築されます。
+
+## ARIA属性
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `role="tablist"` | タブコンテナ | タブグループを識別 |
+| `role="tab"` | 各タブボタン | タブとして識別 |
+| `role="tabpanel"` | 各パネル | パネルとして識別 |
+| `aria-selected="true"` | アクティブなタブ | どのタブが選択されているかを通知 |
+| `aria-controls` | 各タブ | 対応するパネルの`id`を指す |
+| `aria-labelledby` | 各パネル | 対応するタブの`id`を指す |
+| `aria-orientation` | タブコンテナ | `"horizontal"`（デフォルト）または`"vertical"` |
+
+```tsx
+<div role="tablist" aria-label="Account settings" aria-orientation="horizontal">
+  <button role="tab" id="tab-1" aria-selected="true" aria-controls="panel-1">
+    General
+  </button>
+  <button role="tab" id="tab-2" aria-selected="false" aria-controls="panel-2" tabindex="-1">
+    Security
+  </button>
+</div>
+<div role="tabpanel" id="panel-1" aria-labelledby="tab-1">
+  General settings content...
+</div>
+```
+
+## Roving Tabindexによるキーボードナビゲーション
+
+Tabsは前のレッスンで学んだRoving Tabindexパターンを使用します：
+
+| キー | アクション |
+|------|-----------|
+| `Tab` | tablistにフォーカスを移動（選択中のタブへ） |
+| `ArrowRight` | 次のタブにフォーカスを移動（水平方向） |
+| `ArrowLeft` | 前のタブにフォーカスを移動 |
+| `ArrowDown` | 次のタブにフォーカスを移動（垂直方向） |
+| `ArrowUp` | 前のタブにフォーカスを移動（垂直方向） |
+| `Home` | 最初のタブにフォーカスを移動 |
+| `End` | 最後のタブにフォーカスを移動 |
+| `Enter` / `Space` | フォーカスされたタブをアクティブにする（手動アクティベーションモード） |
+
+### 自動 vs 手動アクティベーション
+
+2つのアクティベーション戦略があります：
+
+- **自動**（デフォルト）：フォーカスと選択が同時に行われる。矢印キーがフォーカス移動とタブ選択の両方を行う。
+- **手動**：矢印キーはフォーカスの移動のみ。選択するには`Enter`または`Space`を押す必要がある。
+
+ほとんどの場合、自動アクティベーションが推奨されます。必要なキーストローク数が減るためです。手動アクティベーションは、タブの切り替えがネットワークリクエストなどのコストの高い操作をトリガーする場合に有用です。
+
+## コンポーネントAPIの設計
+
+```tsx
+interface TabsProps {
+  value?: string;              // 制御された選択タブ
+  defaultValue?: string;       // 非制御のデフォルト
+  onValueChange?: (value: string) => void;
+  orientation?: "horizontal" | "vertical";
+  activationMode?: "automatic" | "manual";
+}
+```
+
+Compound Component：
+
+- **`Tabs.Root`** — 選択タブの状態を管理し、contextを提供。
+- **`Tabs.List`** — Roving Tabindexを持つ`tablist`コンテナ。
+- **`Tabs.Tab`** — 個々のタブボタン。
+- **`Tabs.Panel`** — コンテンツパネル。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface TabsContextValue {
+  selectedValue: string;
+  selectTab: (value: string) => void;
+  orientation: "horizontal" | "vertical";
+  activationMode: "automatic" | "manual";
+  registerTab: (value: string, element: HTMLElement) => void;
+  tabElements: React.RefObject<Map<string, HTMLElement>>;
+}
+
+const TabsContext = React.createContext<TabsContextValue | null>(null);
+
+function useTabsContext() {
+  const ctx = React.useContext(TabsContext);
+  if (!ctx) throw new Error("Tabs sub-components must be used within Tabs.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  value: controlledValue,
+  defaultValue = "",
+  onValueChange,
+  orientation = "horizontal",
+  activationMode = "automatic",
+  children,
+  ...props
+}: TabsProps & React.ComponentPropsWithoutRef<"div">) {
+  const [selectedValue, setSelectedValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const tabElements = React.useRef(new Map<string, HTMLElement>());
+
+  const current = controlledValue ?? selectedValue;
+
+  const selectTab = React.useCallback(
+    (val: string) => {
+      if (controlledValue === undefined) setSelectedValue(val);
+      onValueChange?.(val);
+    },
+    [controlledValue, onValueChange],
+  );
+
+  const registerTab = React.useCallback(
+    (val: string, el: HTMLElement) => {
+      tabElements.current.set(val, el);
+    },
+    [],
+  );
+
+  const ctx = React.useMemo(
+    () => ({
+      selectedValue: current,
+      selectTab,
+      orientation,
+      activationMode,
+      registerTab,
+      tabElements,
+    }),
+    [current, selectTab, orientation, activationMode, registerTab],
+  );
+
+  return (
+    <TabsContext value={ctx}>
+      <div data-orientation={orientation} {...props}>
+        {children}
+      </div>
+    </TabsContext>
+  );
+}
+
+// --- List ---
+
+function List({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { orientation } = useTabsContext();
+
+  return (
+    <div
+      role="tablist"
+      aria-orientation={orientation}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+// --- Tab ---
+
+function Tab({
+  value,
+  children,
+  ...props
+}: { value: string } & React.ComponentPropsWithoutRef<"button">) {
+  const {
+    selectedValue,
+    selectTab,
+    orientation,
+    activationMode,
+    registerTab,
+    tabElements,
+  } = useTabsContext();
+
+  const isSelected = selectedValue === value;
+  const tabId = `tab-${React.useId()}`;
+  const panelId = `panel-${React.useId()}`;
+
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) registerTab(value, el);
+    },
+    [value, registerTab],
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const tabs = Array.from(tabElements.current.entries());
+    const currentIdx = tabs.findIndex(([v]) => v === value);
+    const count = tabs.length;
+
+    const forwardKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+    const backwardKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
+
+    let nextIdx: number | null = null;
+
+    if (e.key === forwardKey) {
+      e.preventDefault();
+      nextIdx = (currentIdx + 1) % count;
+    } else if (e.key === backwardKey) {
+      e.preventDefault();
+      nextIdx = (currentIdx - 1 + count) % count;
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      nextIdx = 0;
+    } else if (e.key === "End") {
+      e.preventDefault();
+      nextIdx = count - 1;
+    }
+
+    if (nextIdx !== null) {
+      const [nextValue, nextEl] = tabs[nextIdx];
+      nextEl.focus();
+      if (activationMode === "automatic") selectTab(nextValue);
+    }
+
+    if (activationMode === "manual" && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      selectTab(value);
+    }
+  };
+
+  return (
+    <button
+      role="tab"
+      type="button"
+      id={tabId}
+      ref={ref}
+      aria-selected={isSelected}
+      aria-controls={panelId}
+      tabIndex={isSelected ? 0 : -1}
+      data-state={isSelected ? "active" : "inactive"}
+      onClick={() => selectTab(value)}
+      onKeyDown={handleKeyDown}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Panel ---
+
+function Panel({
+  value,
+  children,
+  forceMount = false,
+  ...props
+}: { value: string; forceMount?: boolean } & React.ComponentPropsWithoutRef<"div">) {
+  const { selectedValue } = useTabsContext();
+  const isSelected = selectedValue === value;
+
+  if (!isSelected && !forceMount) return null;
+
+  return (
+    <div
+      role="tabpanel"
+      data-state={isSelected ? "active" : "inactive"}
+      hidden={!isSelected}
+      tabIndex={0}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+export const Tabs = { Root, List, Tab, Panel };
+```
+
+## 遅延レンダリング vs 即時レンダリング
+
+タブパネルのレンダリングには2つの戦略があります：
+
+### 遅延レンダリング（デフォルト）
+
+選択されたパネルのみがマウントされます。ユーザーがタブを切り替えると、前のパネルがアンマウントされ新しいパネルがマウントされます。メモリ効率が良いですが、切り替え時に内部状態（スクロール位置、フォーム入力など）が失われます。
+
+```tsx
+// 遅延：選択されたパネルのみがDOMに存在
+{tabs.map((tab) => (
+  <Tabs.Panel key={tab.value} value={tab.value}>
+    <ExpensiveComponent />
+  </Tabs.Panel>
+))}
+```
+
+### 即時レンダリング（forceMount）
+
+すべてのパネルが常にマウントされますが、選択されたものだけが表示されます。タブ切り替え間で状態が保持されますが、すべてのパネルがメモリに残ります。
+
+```tsx
+// 即時：すべてのパネルがマウントされ、非アクティブなものは非表示
+{tabs.map((tab) => (
+  <Tabs.Panel key={tab.value} value={tab.value} forceMount>
+    <StatefulForm />
+  </Tabs.Panel>
+))}
+```
+
+`forceMount` propはパネルをDOMに保持し、`hidden`で表示を切り替えます。パネルにフォームやスクロール可能なコンテンツが含まれ、ユーザーが状態の保持を期待する場合に有用です。
+
+### どちらを選ぶべきか？
+
+| シナリオ | 推奨 |
+|----------|------|
+| 静的コンテンツ | 遅延（DOMが小さい） |
+| ユーザー入力のあるフォーム | 即時（状態を保持） |
+| 重いデータフェッチ | 遅延（不要なリクエストを回避） |
+| スクロール可能なコンテンツ | 即時（スクロール位置を保持） |
+
+## アクティブタブのスタイリング
+
+`data-state`属性でCSS限定のスタイリングが可能です：
+
+```css
+[role="tab"][data-state="active"] {
+  border-bottom: 2px solid var(--color-accent);
+  color: var(--color-accent);
+}
+
+[role="tab"][data-state="inactive"] {
+  color: var(--color-muted);
+}
+```
+
+## 重要なポイント
+
+1. **`role="tablist"`、`role="tab"`、`role="tabpanel"`**がスクリーンリーダーに必要なセマンティック構造を構築する。
+2. **`aria-selected`**がタブの現在の選択状態を通知する。
+3. **Roving Tabindex**でタブリストを矢印キーナビゲーション付きの単一タブストップにする。
+4. **自動アクティベーション**はフォーカス時にタブを選択する。**手動**はEnter/Spaceが必要。
+5. **遅延レンダリング**は非アクティブなパネルをアンマウントする。**即時（forceMount）**は状態を保持する。
+6. **`aria-controls`と`aria-labelledby`**でタブとパネルを双方向にリンクする。
+
+## 実践してみよう
+
+<Exercise id="tabs-basic" />

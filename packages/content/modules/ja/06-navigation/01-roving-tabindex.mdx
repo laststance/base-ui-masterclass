@@ -1,0 +1,258 @@
+---
+title: "Roving Tabindexパターン"
+description: "WAI-ARIAのRoving Tabindexパターンをマスターします。矢印キーナビゲーション、ラッピング、Home/Endキーのサポートを学び、TabsとToolbarの基盤を築きます。"
+order: 1
+isFree: false
+---
+
+# Roving Tabindexパターン
+
+**Roving Tabindex**パターンは、Webアクセシビリティにおける最も重要なキーボードナビゲーションパターンの一つです。関連する要素のグループ（タブ、ツールバーボタン、メニュー項目など）を単一のタブストップとして動作させ、グループ内のアイテム間は矢印キーでフォーカスを移動します。このレッスンではこのパターンをゼロから学びます。Tabs、Toolbar、Menu、その他多くの複合ウィジェットの基盤となるためです。
+
+## 問題：タブストップが多すぎる
+
+10個のボタンを持つツールバーを考えてみましょう。Roving Tabindexがなければ、キーボードユーザーはツールバーを通過するために10回Tabキーを押す必要があります。これは面倒であり、複合ウィジェットのWAI-ARIAデザインパターンに違反します。
+
+```
+[Tab] → Button 1 → [Tab] → Button 2 → [Tab] → ... → Button 10 → [Tab] → 次のセクション
+                    （9回もの余分なTabキー！）
+```
+
+Roving Tabindexパターンはこれを単一のタブストップに削減します：
+
+```
+[Tab] → Button 1（または最後にフォーカスされたボタン）
+  [ArrowRight] → Button 2
+  [ArrowRight] → Button 3
+[Tab] → 次のセクション
+```
+
+## Roving Tabindexの仕組み
+
+このテクニックは、グループ全体の`tabindex`属性を操作します：
+
+1. **1つのアイテム**が`tabindex="0"`を持つ — これがアクティブ（フォーカス可能）なアイテム。
+2. **その他すべてのアイテム**が`tabindex="-1"`を持つ — プログラム的にフォーカス可能だがタブ順序には含まれない。
+3. ユーザーが**矢印キー**を押すと、`tabindex="0"`を次のアイテムに移動し、`element.focus()`を呼び出す。
+
+```tsx
+// 変更前：Button 2がアクティブ
+<button tabindex="-1">Button 1</button>
+<button tabindex="0">Button 2</button>  // ← タブ順序に含まれる
+<button tabindex="-1">Button 3</button>
+
+// ArrowRight押下後：Button 3がアクティブ
+<button tabindex="-1">Button 1</button>
+<button tabindex="-1">Button 2</button>
+<button tabindex="0">Button 3</button>  // ← ここに移動
+```
+
+## 矢印キーナビゲーション
+
+使用する矢印キーはウィジェットの方向に依存します：
+
+| 方向 | 前方 | 後方 |
+|------|------|------|
+| 水平 | `ArrowRight` | `ArrowLeft` |
+| 垂直 | `ArrowDown` | `ArrowUp` |
+| 両方 | 4つすべての矢印キーが機能 | 4つすべての矢印キーが機能 |
+
+## ラッピング動作
+
+ユーザーが最後のアイテムに到達して前方矢印キーを押すと、フォーカスは最初のアイテムに戻ります。同様に、最初のアイテムで後方を押すと最後にラップします：
+
+```
+Button 1 ← [ArrowLeft] ← Button 2 ← [ArrowLeft] ← Button 3
+   ↑                                                    ↓
+   └──────────── [ArrowLeftでラップ] ────────────────────┘
+```
+
+## HomeキーとEndキー
+
+| キー | アクション |
+|------|-----------|
+| `Home` | 最初のアイテムにフォーカスを移動 |
+| `End` | 最後のアイテムにフォーカスを移動 |
+
+これらは複合ウィジェットのWAI-ARIA仕様で必須とされています。
+
+## useRovingTabIndex hookの構築
+
+このパターンを再利用可能なhookとして実装しましょう：
+
+```tsx
+import * as React from "react";
+
+interface UseRovingTabIndexOptions {
+  orientation?: "horizontal" | "vertical" | "both";
+  wrap?: boolean;
+  initialIndex?: number;
+}
+
+interface UseRovingTabIndexReturn {
+  activeIndex: number;
+  getItemProps: (index: number) => {
+    tabIndex: number;
+    onKeyDown: (e: React.KeyboardEvent) => void;
+    onFocus: () => void;
+    ref: (el: HTMLElement | null) => void;
+  };
+}
+
+function useRovingTabIndex({
+  orientation = "horizontal",
+  wrap = true,
+  initialIndex = 0,
+}: UseRovingTabIndexOptions = {}): UseRovingTabIndexReturn {
+  const [activeIndex, setActiveIndex] = React.useState(initialIndex);
+  const itemsRef = React.useRef<(HTMLElement | null)[]>([]);
+
+  const getNextIndex = React.useCallback(
+    (current: number, direction: 1 | -1) => {
+      const count = itemsRef.current.length;
+      if (count === 0) return current;
+
+      let next = current + direction;
+
+      if (wrap) {
+        next = ((next % count) + count) % count;
+      } else {
+        next = Math.max(0, Math.min(next, count - 1));
+      }
+
+      return next;
+    },
+    [wrap],
+  );
+
+  const moveFocus = React.useCallback(
+    (nextIndex: number) => {
+      setActiveIndex(nextIndex);
+      itemsRef.current[nextIndex]?.focus();
+    },
+    [],
+  );
+
+  const handleKeyDown = React.useCallback(
+    (event: React.KeyboardEvent) => {
+      const forwardKeys =
+        orientation === "vertical"
+          ? ["ArrowDown"]
+          : orientation === "horizontal"
+            ? ["ArrowRight"]
+            : ["ArrowRight", "ArrowDown"];
+
+      const backwardKeys =
+        orientation === "vertical"
+          ? ["ArrowUp"]
+          : orientation === "horizontal"
+            ? ["ArrowLeft"]
+            : ["ArrowLeft", "ArrowUp"];
+
+      if (forwardKeys.includes(event.key)) {
+        event.preventDefault();
+        moveFocus(getNextIndex(activeIndex, 1));
+      } else if (backwardKeys.includes(event.key)) {
+        event.preventDefault();
+        moveFocus(getNextIndex(activeIndex, -1));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        moveFocus(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        moveFocus(itemsRef.current.length - 1);
+      }
+    },
+    [orientation, activeIndex, getNextIndex, moveFocus],
+  );
+
+  const getItemProps = React.useCallback(
+    (index: number) => ({
+      tabIndex: index === activeIndex ? 0 : -1,
+      onKeyDown: handleKeyDown,
+      onFocus: () => setActiveIndex(index),
+      ref: (el: HTMLElement | null) => {
+        itemsRef.current[index] = el;
+      },
+    }),
+    [activeIndex, handleKeyDown],
+  );
+
+  return { activeIndex, getItemProps };
+}
+```
+
+## 使用例
+
+```tsx
+function Toolbar() {
+  const { getItemProps } = useRovingTabIndex({
+    orientation: "horizontal",
+  });
+
+  return (
+    <div role="toolbar" aria-label="Text formatting">
+      <button {...getItemProps(0)}>Bold</button>
+      <button {...getItemProps(1)}>Italic</button>
+      <button {...getItemProps(2)}>Underline</button>
+    </div>
+  );
+}
+```
+
+アクティブなボタンのみがタブ順序に含まれます。矢印キーでボタン間のフォーカスを移動します。Tabキーでツールバー全体を抜けます。
+
+## 無効なアイテムのスキップ
+
+実世界の実装では、矢印キーナビゲーション中に無効なアイテムをスキップする必要があります：
+
+```tsx
+const getNextIndex = (current: number, direction: 1 | -1) => {
+  const count = itemsRef.current.length;
+  let next = current;
+  let attempts = 0;
+
+  do {
+    next = next + direction;
+    if (wrap) {
+      next = ((next % count) + count) % count;
+    } else {
+      next = Math.max(0, Math.min(next, count - 1));
+    }
+    attempts++;
+  } while (
+    itemsRef.current[next]?.hasAttribute("disabled") &&
+    attempts < count
+  );
+
+  return next;
+};
+```
+
+## Contextベースのアプローチ
+
+TabsやToolbarのようなCompound Componentでは、hookではなくcontextを通じてRoving Tabindexを管理することが多く、子コンポーネントが自身を登録できるようにします：
+
+```tsx
+const RovingContext = React.createContext<{
+  activeIndex: number;
+  register: (index: number, element: HTMLElement) => void;
+  onKeyDown: (event: React.KeyboardEvent) => void;
+} | null>(null);
+```
+
+次のレッスンでTabsとToolbarを構築する際に、このcontextベースのアプローチを使用します。
+
+## 重要なポイント
+
+1. **Roving Tabindex**は要素のグループを単一のタブストップとして動作させる。
+2. **1つのアイテムが`tabindex="0"`**を持ち、他のすべてが`tabindex="-1"`を持つ。
+3. **矢印キー**でフォーカスを移動する。使用する矢印キーは方向に依存。
+4. **ラッピング**で最後から最初（およびその逆）にフォーカスを移動。
+5. **Home/End**でそれぞれ最初/最後のアイテムにジャンプ。
+6. **無効なアイテムはスキップ**する。
+7. このパターンはWAI-ARIAにおいて**タブ、ツールバー、メニュー、ツリービュー**、およびその他の複合ウィジェットに必須。
+
+## 実践してみよう
+
+<Exercise id="roving-tabindex" />

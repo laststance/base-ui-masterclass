@@ -1,0 +1,230 @@
+---
+title: "useControllableState Hook"
+description: "制御・非制御の両方の使用モードをサポートするすべてのBase UIコンポーネントの基盤となるuseControllableStateパターンをマスターします。"
+order: 1
+isFree: false
+---
+
+# useControllableState Hook
+
+すべてのインタラクティブなBase UIコンポーネント -- Switch、Checkbox、Toggle、Select、Dialog -- は**制御と非制御の両方**の使用をサポートしています。`useControllableState` hookはこれを可能にするエンジンです。ライブラリ全体で最も重要なユーティリティと言えるでしょう。
+
+## 問題
+
+Switchコンポーネントを考えてみましょう。利用者は2つの方法で使用するかもしれません：
+
+```tsx
+// 非制御: コンポーネントが自身のステートを管理
+<Switch defaultChecked={false} />
+
+// 制御: 親がステートを管理
+<Switch checked={isOn} onCheckedChange={setIsOn} />
+```
+
+共通の抽象化がなければ、すべてのコンポーネントで同じ条件分岐ロジックを重複させる必要があります：「自分は制御されている？propを使う。非制御？内部ステートを使う。」これはエラーが起きやすく、DRYの原則に違反します。
+
+## 解決策: useControllableState
+
+```tsx
+function useControllableState<T>({
+  value,
+  defaultValue,
+  onChange,
+}: {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}): [T, (nextValue: T) => void] {
+  // ...
+}
+```
+
+このhookは`useState`と同じ`[state, setState]`タプルを返しますが、自動的に以下を行います：
+
+1. コンポーネントが**制御されている**場合（valueが`undefined`でない）、`value`を使用
+2. **非制御**の場合、`defaultValue`から初期化された内部ステートを使用
+3. 両方のモードで`onChange`を呼び出し、親が変更に反応できるようにする
+
+## ステップバイステップの実装
+
+### ステップ1: モードの検出
+
+```tsx
+function useControllableState<T>({
+  value: controlledValue,
+  defaultValue,
+  onChange,
+}: {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}): [T, (nextValue: T) => void] {
+  const isControlled = controlledValue !== undefined;
+```
+
+モードは`value`が`undefined`かどうかで決定されます。これは意図的で、`null`、`false`、`0`、`""`が有効な制御値として使えるようにするためです。
+
+### ステップ2: 内部ステートの管理
+
+```tsx
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+
+  // 解決された値: 制御propが優先
+  const resolvedValue = isControlled ? controlledValue : internalValue;
+```
+
+### ステップ3: 統一されたsetterの作成
+
+```tsx
+  const setValue = React.useCallback(
+    (nextValue: T) => {
+      if (!isControlled) {
+        setInternalValue(nextValue);
+      }
+      onChange?.(nextValue);
+    },
+    [isControlled, onChange],
+  );
+
+  return [resolvedValue, setValue];
+}
+```
+
+制御モードでは`onChange`のみを呼び出します -- 値の更新は親の責任です。非制御モードでは内部ステートを更新し、**かつ**`onChange`も呼び出すことで、親が望めば変更を観察できるようにします。
+
+## 完全なHook
+
+```tsx
+import * as React from "react";
+
+/**
+ * 制御または非制御のどちらでも動作するステートを管理します。
+ *
+ * `value`が提供されている場合（undefinedでない）、コンポーネントは制御され
+ * 親がステートを所有します。`value`がundefinedの場合、コンポーネントは
+ * `defaultValue`から初期化された内部ステートを自分で管理します。
+ *
+ * @param options.value - 制御値（undefined = 非制御モード）
+ * @param options.defaultValue - 非制御モードの初期値
+ * @param options.onChange - 値が変更されたときに呼ばれるコールバック（両モード）
+ * @returns React.useStateと同一の[value, setValue]タプル
+ *
+ * @example
+ * // Switchコンポーネント内で:
+ * const [checked, setChecked] = useControllableState({
+ *   value: props.checked,
+ *   defaultValue: props.defaultChecked ?? false,
+ *   onChange: props.onCheckedChange,
+ * });
+ */
+function useControllableState<T>({
+  value: controlledValue,
+  defaultValue,
+  onChange,
+}: {
+  value?: T;
+  defaultValue: T;
+  onChange?: (value: T) => void;
+}): [T, (nextValue: T) => void] {
+  const isControlled = controlledValue !== undefined;
+  const [internalValue, setInternalValue] = React.useState(defaultValue);
+
+  const resolvedValue = isControlled ? controlledValue : internalValue;
+
+  const setValue = React.useCallback(
+    (nextValue: T) => {
+      if (!isControlled) {
+        setInternalValue(nextValue);
+      }
+      onChange?.(nextValue);
+    },
+    [isControlled, onChange],
+  );
+
+  return [resolvedValue, setValue];
+}
+```
+
+## エッジケースと注意点
+
+### 1. 制御と非制御の切り替え
+
+Reactは、コンポーネントのライフタイム中に制御から非制御（またはその逆）に切り替わると警告を出します。開発時のみの警告を追加できます：
+
+```tsx
+if (process.env.NODE_ENV !== "production") {
+  const wasControlled = React.useRef(isControlled);
+  React.useEffect(() => {
+    if (wasControlled.current !== isControlled) {
+      console.warn(
+        "A component changed from " +
+          (wasControlled.current ? "controlled" : "uncontrolled") +
+          " to " +
+          (isControlled ? "controlled" : "uncontrolled") +
+          ". This is not supported.",
+      );
+    }
+  });
+}
+```
+
+### 2. コールバックの同一性
+
+`onChange`コールバックは利用者によってメモ化されていない可能性があります。`setValue`を`useCallback`でラップし、依存配列に`onChange`を含めると、`onChange`が変更されるたびにsetterの同一性が変わります。パフォーマンスが重要な場合は、refを使用します：
+
+```tsx
+const onChangeRef = React.useRef(onChange);
+onChangeRef.current = onChange;
+
+const setValue = React.useCallback(
+  (nextValue: T) => {
+    if (!isControlled) {
+      setInternalValue(nextValue);
+    }
+    onChangeRef.current?.(nextValue);
+  },
+  [isControlled],
+);
+```
+
+### 3. マウント後のdefaultValueの変更
+
+`useState`と同様に、`defaultValue`パラメータは初回レンダリング時にのみ使用されます。マウント後に変更しても効果はありません。これは期待される動作であり、Reactの振る舞いと一致しています。
+
+## コンポーネントでの使用
+
+Switchがこのhookをどのように使用するかのプレビューです（次のレッスンで詳しく説明します）：
+
+```tsx
+function Switch({ checked, defaultChecked, onCheckedChange, ...props }) {
+  const [isChecked, setChecked] = useControllableState({
+    value: checked,
+    defaultValue: defaultChecked ?? false,
+    onChange: onCheckedChange,
+  });
+
+  return (
+    <button
+      role="switch"
+      aria-checked={isChecked}
+      onClick={() => setChecked(!isChecked)}
+      {...props}
+    />
+  );
+}
+```
+
+コンポーネントのコードはクリーンで、制御されているかどうかを気にしません。hookがすべてを処理します。
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| 制御 vs. 非制御 | `value !== undefined`で検出 |
+| 内部ステート | 非制御モードでのみ更新 |
+| 統一されたsetter | 両モードで`onChange`を呼び出す |
+| エッジケース | モード切替の警告、コールバックref、defaultValueのセマンティクス |
+
+このhookはライブラリのバックボーンです。SwitchからDialogまで、すべてのコンポーネントがこれを使用します。ここで正しく構築すれば、残りは自然と続きます。
+
+<Exercise id="use-controllable-state" />

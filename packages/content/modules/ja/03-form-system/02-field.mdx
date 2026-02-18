@@ -1,0 +1,350 @@
+---
+title: "Fieldコンポーネントの構築"
+description: "ラベル、input、説明、エラーメッセージをuseIdによるARIA関連付けで1つのアクセシブルな単位にまとめるFieldコンポーネントを構築します。"
+order: 2
+isFree: false
+---
+
+# Fieldコンポーネントの構築
+
+フォームフィールドは単なるinputではありません。ARIAで接続する必要がある4つの要素の**コンポジション**です：
+
+1. **Label** -- フィールドを説明（`<label>`）
+2. **Control** -- input要素（`<input>`、`<select>`、`<textarea>`）
+3. **Description** -- ヘルプテキスト（`aria-describedby`）
+4. **Error** -- バリデーションエラーメッセージ（`aria-errormessage`または`aria-describedby`）
+
+適切な関連付けがなければ、スクリーンリーダーはこれらの要素を結び付けられません。目が見えるユーザーはレイアウトを見て「Email」がその下のテキスト入力のラベルだと理解します。スクリーンリーダーのユーザーには、同じ接続を作るためにARIA属性が必要です。
+
+## 関連付けの問題
+
+よくあるパターンを考えてみましょう：
+
+```tsx
+{/* 問題あり: スクリーンリーダーはこれらが関連していることを認識できない */}
+<span>Email</span>
+<input type="email" />
+<span>We'll never share your email</span>
+<span>Invalid email address</span>
+```
+
+修正にはIDとARIA属性が必要です：
+
+```tsx
+<label htmlFor="email-input">Email</label>
+<input
+  id="email-input"
+  type="email"
+  aria-describedby="email-desc email-error"
+  aria-invalid={hasError}
+/>
+<span id="email-desc">We'll never share your email</span>
+<span id="email-error" role="alert">Invalid email address</span>
+```
+
+IDを手動で管理するのは面倒でエラーが起きやすいです。Fieldコンポーネントがこれを自動化します。
+
+## ステップ1: useIdで安定したIDを生成
+
+React 18以降は、安定したSSR安全なユニークIDを生成する`useId()`を提供します：
+
+```tsx
+import * as React from "react";
+
+function useFieldIds() {
+  const id = React.useId();
+  return {
+    controlId: `${id}-control`,
+    labelId: `${id}-label`,
+    descriptionId: `${id}-description`,
+    errorId: `${id}-error`,
+  };
+}
+```
+
+## ステップ2: Field Contextの定義
+
+Field親はcontext経由で子にIDとステートを共有します：
+
+```tsx
+interface FieldContextValue {
+  controlId: string;
+  labelId: string;
+  descriptionId: string;
+  errorId: string;
+  invalid: boolean;
+  disabled: boolean;
+  hasDescription: boolean;
+  hasError: boolean;
+  setHasDescription: (value: boolean) => void;
+  setHasError: (value: boolean) => void;
+  setInvalid: (value: boolean) => void;
+}
+
+const FieldContext = React.createContext<FieldContextValue | null>(null);
+
+function useFieldContext() {
+  const ctx = React.useContext(FieldContext);
+  if (!ctx) {
+    throw new Error("Field.* components must be used within a Field.Root");
+  }
+  return ctx;
+}
+```
+
+## ステップ3: Field.Rootの構築
+
+```tsx
+interface FieldRootProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** フィールドが無効かどうか */
+  invalid?: boolean;
+  /** フィールドが無効化されているかどうか */
+  disabled?: boolean;
+  ref?: React.Ref<HTMLDivElement>;
+}
+
+function FieldRoot({
+  invalid: controlledInvalid = false,
+  disabled = false,
+  children,
+  ref,
+  ...props
+}: FieldRootProps) {
+  const ids = useFieldIds();
+  const [hasDescription, setHasDescription] = React.useState(false);
+  const [hasError, setHasError] = React.useState(false);
+  const [invalid, setInvalid] = React.useState(controlledInvalid);
+
+  // 制御されたinvalid propを同期
+  React.useEffect(() => {
+    setInvalid(controlledInvalid);
+  }, [controlledInvalid]);
+
+  const contextValue = React.useMemo<FieldContextValue>(
+    () => ({
+      ...ids,
+      invalid,
+      disabled,
+      hasDescription,
+      hasError,
+      setHasDescription,
+      setHasError,
+      setInvalid,
+    }),
+    [ids, invalid, disabled, hasDescription, hasError],
+  );
+
+  return (
+    <FieldContext value={contextValue}>
+      <div
+        ref={ref}
+        {...props}
+        data-invalid={invalid || undefined}
+        data-disabled={disabled || undefined}
+      >
+        {children}
+      </div>
+    </FieldContext>
+  );
+}
+```
+
+## ステップ4: Field.Labelの構築
+
+```tsx
+interface FieldLabelProps extends React.ComponentPropsWithoutRef<"label"> {
+  ref?: React.Ref<HTMLLabelElement>;
+}
+
+function FieldLabel({ ref, ...props }: FieldLabelProps) {
+  const { controlId, labelId } = useFieldContext();
+
+  return (
+    <label
+      ref={ref}
+      id={labelId}
+      htmlFor={controlId}
+      {...props}
+    />
+  );
+}
+```
+
+## ステップ5: Field.Controlの構築
+
+controlはinputをラップし、label、description、errorと接続します：
+
+```tsx
+interface FieldControlProps extends React.ComponentPropsWithoutRef<"input"> {
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLInputElement>;
+}
+
+function FieldControl({ render, ref, onInvalid, ...props }: FieldControlProps) {
+  const {
+    controlId,
+    descriptionId,
+    errorId,
+    invalid,
+    disabled,
+    hasDescription,
+    hasError,
+    setInvalid,
+  } = useFieldContext();
+
+  // 利用可能なdescriptionからaria-describedbyを構築
+  const describedBy = [
+    hasDescription ? descriptionId : null,
+    hasError && invalid ? errorId : null,
+  ]
+    .filter(Boolean)
+    .join(" ") || undefined;
+
+  const handleInvalid = (e: React.FormEvent<HTMLInputElement>) => {
+    setInvalid(true);
+    onInvalid?.(e);
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    id: controlId,
+    disabled,
+    "aria-invalid": invalid || undefined,
+    "aria-describedby": describedBy,
+    onInvalid: handleInvalid,
+    "data-invalid": invalid || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <input {...elementProps} />;
+}
+```
+
+## ステップ6: Field.Descriptionの構築
+
+```tsx
+interface FieldDescriptionProps extends React.ComponentPropsWithoutRef<"span"> {
+  ref?: React.Ref<HTMLSpanElement>;
+}
+
+function FieldDescription({ ref, ...props }: FieldDescriptionProps) {
+  const { descriptionId, setHasDescription } = useFieldContext();
+
+  React.useEffect(() => {
+    setHasDescription(true);
+    return () => setHasDescription(false);
+  }, [setHasDescription]);
+
+  return <span ref={ref} id={descriptionId} {...props} />;
+}
+```
+
+## ステップ7: Field.Errorの構築
+
+errorはフィールドが無効な場合にのみコンテンツをレンダリングします：
+
+```tsx
+interface FieldErrorProps extends React.ComponentPropsWithoutRef<"span"> {
+  /** フィールドが有効でも強制的に表示 */
+  forceShow?: boolean;
+  ref?: React.Ref<HTMLSpanElement>;
+}
+
+function FieldError({
+  forceShow = false,
+  children,
+  ref,
+  ...props
+}: FieldErrorProps) {
+  const { errorId, invalid, setHasError } = useFieldContext();
+
+  const shouldShow = forceShow || invalid;
+
+  React.useEffect(() => {
+    setHasError(true);
+    return () => setHasError(false);
+  }, [setHasError]);
+
+  if (!shouldShow) {
+    return null;
+  }
+
+  return (
+    <span
+      ref={ref}
+      id={errorId}
+      role="alert"
+      {...props}
+    >
+      {children}
+    </span>
+  );
+}
+```
+
+## ステップ8: ネームスペースとしてエクスポート
+
+```tsx
+export const Field = {
+  Root: FieldRoot,
+  Label: FieldLabel,
+  Control: FieldControl,
+  Description: FieldDescription,
+  Error: FieldError,
+};
+```
+
+## 使用例
+
+```tsx
+<Field.Root invalid={!!errors.email}>
+  <Field.Label>Email address</Field.Label>
+  <Field.Control
+    type="email"
+    required
+    placeholder="you@example.com"
+  />
+  <Field.Description>
+    We will never share your email with anyone.
+  </Field.Description>
+  <Field.Error>
+    {errors.email}
+  </Field.Error>
+</Field.Root>
+```
+
+レンダリングされたHTMLでは、すべてのIDとARIA属性が自動的に接続されます：
+
+```html
+<div data-invalid>
+  <label id=":r1:-label" for=":r1:-control">Email address</label>
+  <input
+    id=":r1:-control"
+    type="email"
+    required
+    aria-invalid
+    aria-describedby=":r1:-description :r1:-error"
+    data-invalid
+  />
+  <span id=":r1:-description">We will never share your email with anyone.</span>
+  <span id=":r1:-error" role="alert">Invalid email address</span>
+</div>
+```
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| `useId()` | ARIA関連付け用のSSR安全なユニークIDを生成 |
+| 複合コンポーネント | Label、Control、Description、Errorがすべてcontextを共有 |
+| `aria-describedby` | ヘルプテキストとエラーをinputに接続 |
+| `aria-invalid` | バリデーション状態をスクリーンリーダーに伝達 |
+| `role="alert"` | エラーをスクリーンリーダーに即座に読み上げ |
+| 登録パターン | 子が自身を登録（setHasDescription）し、親が何が存在するか把握 |
+
+Fieldは最も重要なフォームプリミティブです。すべてのフォーム入力 -- email、password、select、textarea -- はFieldでラップされます。次は、すべてのフィールドを集約して送信を管理するFormコンポーネントを構築します。
