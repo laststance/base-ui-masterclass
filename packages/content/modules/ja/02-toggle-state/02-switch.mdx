@@ -1,0 +1,247 @@
+---
+title: "ヘッドレスSwitchの構築"
+description: "role='switch'、aria-checked、キーボードトグルのサポート、useControllableState hookを使用したヘッドレスSwitchコンポーネントを構築します。"
+order: 2
+isFree: false
+---
+
+# ヘッドレスSwitchの構築
+
+Switchは`useControllableState`を使用する最初のコンポーネントです。また、**ARIAロール**と**キーボードインタラクション** -- すべてのインタラクティブコンポーネントに必要な2つの概念を導入します。
+
+## Switchを構成するもの
+
+WAI-ARIA仕様によると、switchはオン/オフの状態を表すトグルです：
+
+| 属性 | 値 | 目的 |
+|------|-----|------|
+| `role` | `"switch"` | スクリーンリーダーにこれが通常のボタンではなくトグルであると伝える |
+| `aria-checked` | `true`または`false` | 現在の状態を伝達 |
+| キーボード | SpaceとEnter | 状態をトグル |
+
+これらがなければ、ブーリアンをトグルする`<button>`は単なるボタンです。これらがあれば、ファーストクラスのアクセシブルなスイッチになります。
+
+## ステップ1: Propsの定義
+
+```tsx
+import * as React from "react";
+
+interface SwitchProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  /** 制御されたcheckedステート */
+  checked?: boolean;
+  /** 非制御モードの初期checkedステート */
+  defaultChecked?: boolean;
+  /** checkedステートが変更されたときに呼ばれるコールバック */
+  onCheckedChange?: (checked: boolean) => void;
+  /** オプショナルなrender prop */
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+```
+
+`onCheckedChange`との競合を避けるため、button propsから`onChange`を除外しています。`onXxxChange`という命名規則はBase UI全体で使用されています。
+
+## ステップ2: useControllableStateの使用
+
+```tsx
+export function Switch({
+  checked: controlledChecked,
+  defaultChecked = false,
+  onCheckedChange,
+  disabled,
+  render,
+  ref,
+  ...props
+}: SwitchProps) {
+  const [checked, setChecked] = useControllableState({
+    value: controlledChecked,
+    defaultValue: defaultChecked,
+    onChange: onCheckedChange,
+  });
+
+  const toggle = () => {
+    if (!disabled) {
+      setChecked(!checked);
+    }
+  };
+```
+
+`toggle`関数は非常にシンプルです。`useControllableState`が両方のモードを処理するため、ブーリアンを反転させるだけです。
+
+## ステップ3: キーボードインタラクションの処理
+
+WAI-ARIAのswitchパターンでは、SpaceとEnterでトグルが必要です：
+
+```tsx
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      toggle();
+    }
+    props.onKeyDown?.(e);
+  };
+```
+
+ちょっと待ってください -- ネイティブの`<button>`要素はSpaceとEnterですでに`onClick`を発火します。`onClick`をハンドリングしていれば、`onKeyDown`は必要ないのでは？
+
+**はいといいえ。** デフォルトの`<button>`を使用する場合、キーボードハンドリングは無料です。しかしrender propで`<div>`や`<span>`を使用する場合、ネイティブのキーボードサポートはありません。明示的な`onKeyDown`を追加することで、基盤要素に関係なくコンポーネントが動作します。
+
+## ステップ4: コンポーネントの組み立て
+
+```tsx
+  const dataAttributes = {
+    "data-checked": checked || undefined,
+    "data-unchecked": !checked || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    role: "switch" as const,
+    "aria-checked": checked,
+    disabled,
+    onClick: toggle,
+    onKeyDown: handleKeyDown,
+    ...dataAttributes,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button type="button" {...elementProps} />;
+}
+```
+
+### なぜ`type="button"`なのか？
+
+`<form>`内で`type`を指定しない`<button>`は、デフォルトで`type="submit"`になり、クリック時にフォームを送信してしまいます。送信ボタンでないボタンには常に`type="button"`を設定しましょう。
+
+## 完全なコンポーネント
+
+```tsx
+import * as React from "react";
+import { useControllableState } from "./use-controllable-state";
+
+interface SwitchProps extends Omit<React.ComponentPropsWithoutRef<"button">, "onChange"> {
+  checked?: boolean;
+  defaultChecked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLButtonElement>;
+}
+
+export function Switch({
+  checked: controlledChecked,
+  defaultChecked = false,
+  onCheckedChange,
+  disabled,
+  render,
+  ref,
+  ...props
+}: SwitchProps) {
+  const [checked, setChecked] = useControllableState({
+    value: controlledChecked,
+    defaultValue: defaultChecked,
+    onChange: onCheckedChange,
+  });
+
+  const toggle = () => {
+    if (!disabled) {
+      setChecked(!checked);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      toggle();
+    }
+    props.onKeyDown?.(e);
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    role: "switch" as const,
+    "aria-checked": checked,
+    disabled,
+    type: "button" as const,
+    onClick: toggle,
+    onKeyDown: handleKeyDown,
+    "data-checked": checked || undefined,
+    "data-unchecked": !checked || undefined,
+    "data-disabled": disabled || undefined,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <button {...elementProps} />;
+}
+```
+
+## Data属性によるスタイリング
+
+```css
+/* トラック */
+.switch {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--color-neutral-300);
+  transition: background 150ms;
+}
+
+.switch[data-checked] {
+  background: var(--color-primary-500);
+}
+
+.switch[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+## 使用例
+
+### 非制御
+
+```tsx
+<Switch defaultChecked={false}>
+  Dark mode
+</Switch>
+```
+
+### 制御
+
+```tsx
+function Settings() {
+  const [darkMode, setDarkMode] = React.useState(false);
+
+  return (
+    <Switch
+      checked={darkMode}
+      onCheckedChange={setDarkMode}
+    >
+      Dark mode
+    </Switch>
+  );
+}
+```
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| `role="switch"` | 支援技術にこれがトグルであると伝える |
+| `aria-checked` | オン/オフの状態を伝達 |
+| `useControllableState` | 制御/非制御を1行で処理 |
+| キーボードハンドリング | 基盤要素に関係なくSpaceとEnterでトグル |
+| `type="button"` | 意図しないフォーム送信を防止 |
+
+Switchは、より複雑なトグル可能コンポーネントへのゲートウェイです。次はToggleとToggleGroup -- グループステート管理のためにReact Contextを導入します。
+
+<Exercise id="switch-basic" />

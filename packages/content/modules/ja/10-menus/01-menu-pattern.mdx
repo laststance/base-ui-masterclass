@@ -1,0 +1,260 @@
+---
+title: "ARIAメニューパターン"
+description: "menuitem、menuitemcheckbox、menuitemradioロール、メニュー内のroving tabindex、タイプアヘッド検索を含むWAI-ARIAメニューパターンをマスターします。"
+order: 1
+isFree: false
+---
+
+# ARIAメニューパターン
+
+**メニュー**パターンは、最もニュアンスの多いARIAパターンの一つです。デスクトップアプリケーションのメニュー、つまりネイティブアプリケーションのファイル/編集/表示メニューバーの振る舞いをモデル化しています。MenuやContextMenuコンポーネントを構築する前に、このパターンを深く理解することが不可欠です。メニューには他の複合ウィジェットとは大きく異なる厳格なキーボード動作があるためです。
+
+## `role="menu"` を使うべき場合（と使うべきでない場合）
+
+これはメニューに関して開発者が最もよく犯す間違いです：
+
+| ユースケース | 正しいロール | 誤ったロール |
+|----------|-------------|------------|
+| アクション付きアプリケーションスタイルのドロップダウン | `menu` / `menuitem` | — |
+| ナビゲーションリンク | `nav` + `<a>` | `menu` / `menuitem` |
+| 選択肢のリスト（一つ選ぶ） | `listbox` / `option` | `menu` / `menuitem` |
+| ツールバーボタン | `toolbar` + `button` | `menu` / `menuitem` |
+
+<Callout type="warning">
+`role="menu"` はナビゲーション用ではありません。異なるページへのリンクリストには `<nav>` と `<a>` 要素を使用すべきで、メニューではありません。メニューは**アクション**のためのもの — 「コピー」「貼り付け」「削除」「名前を付けて保存」のように、「クリック」したときに何かが起こるものです。
+</Callout>
+
+WAI-ARIA仕様は明確に述べています：メニューはユーザーに選択肢のリストを提示するウィジェットであり、通常はアクションや機能です。ナビゲーションメニュー（サイトのナビバー）には `role="menu"` を使用すべきではありません。
+
+## メニューロール
+
+| ロール | 目的 | 例 |
+|------|---------|---------|
+| `menu` | メニュー項目のコンテナ | ドロップダウンパネル |
+| `menubar` | 水平メニューバー | ファイル / 編集 / 表示バー |
+| `menuitem` | アクション可能なメニュー項目 | 「コピー」「貼り付け」 |
+| `menuitemcheckbox` | トグル可能なメニュー項目 | 「サイドバーを表示」（オン/オフ） |
+| `menuitemradio` | ラジオスタイルのメニュー項目 | 「並び順：名前 / 日付 / サイズ」 |
+
+### メニュー項目ロールの詳細
+
+**`menuitem`** — 最も一般的なロールです。アクティベートされるとアクションを実行するコマンドを表します。
+
+```tsx
+<li role="menuitem" onClick={handleCopy}>Copy</li>
+```
+
+**`menuitemcheckbox`** — バイナリトグルを表します。`aria-checked` 属性が状態を伝えます。
+
+```tsx
+<li role="menuitemcheckbox" aria-checked={showSidebar} onClick={toggleSidebar}>
+  Show Sidebar
+</li>
+```
+
+**`menuitemradio`** — 相互排他グループ内の一つの選択肢を表します。グループ化された項目は `role="group"` コンテナで囲む必要があります。
+
+```tsx
+<ul role="group" aria-label="Sort by">
+  <li role="menuitemradio" aria-checked={sortBy === "name"}>Name</li>
+  <li role="menuitemradio" aria-checked={sortBy === "date"}>Date</li>
+  <li role="menuitemradio" aria-checked={sortBy === "size"}>Size</li>
+</ul>
+```
+
+## メニュー用ARIA属性
+
+| 属性 | 適用先 | 目的 |
+|-----------|-----------|---------|
+| `role="menu"` | コンテナ | メニューウィジェットとして識別 |
+| `aria-label` / `aria-labelledby` | メニュー | アクセシブル名を提供 |
+| `aria-orientation` | メニュー | `"vertical"`（デフォルト）または `"horizontal"` |
+| `aria-checked` | `menuitemcheckbox` / `menuitemradio` | トグル状態を伝達 |
+| `aria-disabled` | 任意のメニュー項目 | 項目が利用不可であることを示す |
+| `aria-haspopup` | サブメニュー付き項目 | `"menu"` でサブメニューの存在を示す |
+| `aria-expanded` | サブメニュー付き項目 | サブメニューが開いているかどうか |
+
+## キーボードナビゲーション
+
+メニューは内部で**roving tabindex**を使いますが、タブやツールバーとは異なる特有のルールがあります：
+
+### 垂直メニュー（デフォルト）
+
+| キー | アクション |
+|-----|--------|
+| `ArrowDown` | 次の項目にフォーカスを移動 |
+| `ArrowUp` | 前の項目にフォーカスを移動 |
+| `Home` | 最初の項目にフォーカスを移動 |
+| `End` | 最後の項目にフォーカスを移動 |
+| `Enter` / `Space` | フォーカスされた項目をアクティベート |
+| `Escape` | メニューを閉じ、トリガーにフォーカスを戻す |
+| `ArrowRight` | サブメニューを開く（項目にサブメニューがある場合） |
+| `ArrowLeft` | サブメニューを閉じ、親メニューに戻る |
+
+### 水平メニューバー
+
+| キー | アクション |
+|-----|--------|
+| `ArrowRight` | 次のトップレベル項目にフォーカスを移動 |
+| `ArrowLeft` | 前のトップレベル項目にフォーカスを移動 |
+| `ArrowDown` | ドロップダウンを開き、最初の項目にフォーカス |
+| `ArrowUp` | ドロップダウンを開き、最後の項目にフォーカス |
+| `Home` | 最初の項目にフォーカスを移動 |
+| `End` | 最後の項目にフォーカスを移動 |
+| `Escape` | ドロップダウンを閉じる |
+
+### ラップ動作
+
+listboxとは異なり、メニューナビゲーションは**ラップします**。最後の項目で `ArrowDown` を押すと、最初の項目にフォーカスが移動します。これはネイティブOSのメニュー動作と一致しています。
+
+## メニューにおけるRoving Tabindex
+
+実装はタブやツールバーと同じ原則に従います — 一つの項目が `tabindex="0"` を持ち、他のすべては `tabindex="-1"` を持ちます：
+
+```tsx
+function MenuList({ items }: { items: MenuItem[] }) {
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const itemRefs = React.useRef<(HTMLElement | null)[]>([]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const count = items.length;
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (activeIndex + 1) % count;
+        setActiveIndex(next);
+        itemRefs.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (activeIndex - 1 + count) % count;
+        setActiveIndex(prev);
+        itemRefs.current[prev]?.focus();
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setActiveIndex(0);
+        itemRefs.current[0]?.focus();
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        const last = count - 1;
+        setActiveIndex(last);
+        itemRefs.current[last]?.focus();
+        break;
+      }
+    }
+  };
+
+  return (
+    <ul role="menu" onKeyDown={handleKeyDown}>
+      {items.map((item, index) => (
+        <li
+          key={item.id}
+          role="menuitem"
+          tabIndex={index === activeIndex ? 0 : -1}
+          ref={(el) => { itemRefs.current[index] = el; }}
+          onFocus={() => setActiveIndex(index)}
+        >
+          {item.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="info">
+Select/Comboboxが `aria-activedescendant` を使うのとは異なり、メニューは各メニュー項目に**実際のDOMフォーカス**を移動します。これは、フォーカスを維持するテキスト入力がないためです — メニュー自体が開かれたときにフォーカスを受け取ります。
+</Callout>
+
+## メニューのタイプアヘッド
+
+メニューはタイプアヘッドナビゲーションをサポートしており、ユーザーが最初の文字を入力して項目にジャンプできます：
+
+```tsx
+const bufferRef = React.useRef("");
+const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+const handleTypeahead = (key: string) => {
+  if (key.length !== 1) return;
+
+  clearTimeout(timeoutRef.current);
+  bufferRef.current += key.toLowerCase();
+
+  const matchIndex = items.findIndex((item) =>
+    item.label.toLowerCase().startsWith(bufferRef.current),
+  );
+
+  if (matchIndex !== -1) {
+    setActiveIndex(matchIndex);
+    itemRefs.current[matchIndex]?.focus();
+  }
+
+  timeoutRef.current = setTimeout(() => {
+    bufferRef.current = "";
+  }, 500);
+};
+```
+
+矢印キーやその他の制御キーをチェックした後、`onKeyDown` イベントのdefaultケースにタイプアヘッドハンドラを追加します。
+
+## 無効な項目
+
+無効なメニュー項目は**フォーカス可能だがアクティベート不可**であるべきです。これは無効なボタンの動作とは異なります：
+
+```tsx
+<li
+  role="menuitem"
+  aria-disabled="true"
+  tabIndex={index === activeIndex ? 0 : -1}
+  onClick={(e) => {
+    if (item.disabled) {
+      e.preventDefault();
+      return;
+    }
+    item.onSelect();
+  }}
+>
+  {item.label}
+</li>
+```
+
+<Callout type="tip">
+矢印キーナビゲーション中に無効な項目をスキップしないでください。ユーザーは無効な項目にフォーカスして、その項目が存在することを発見し、なぜ無効なのかを理解できるべきです（ツールチップやコンテキストヘルプを通じて）。項目はアクティベートされたときに何もしないだけです。
+</Callout>
+
+## セパレーター
+
+メニュー項目のグループ間の視覚的なセパレーターには `role="separator"` を使用します：
+
+```tsx
+<li role="separator" aria-orientation="horizontal" />
+```
+
+セパレーターはフォーカス不可で、キーボードナビゲーション中はスキップされます。roving tabindexのロジックから除外する必要があります。
+
+## メニュー vs Listbox：判断ガイド
+
+| 質問 | はいの場合 → | いいえの場合 → |
+|----------|----------|---------|
+| 項目がアクションを実行するか？ | `menu` / `menuitem` | `listbox` / `option` |
+| 項目が値を選択するか？ | `listbox` / `option` | `menu` / `menuitem` |
+| フォーカスがラップするか？ | `menu`（ラップ） | `listbox`（クランプ） |
+| 項目をチェックできるか？ | `menuitemcheckbox` または `menuitemradio` | — |
+| 右クリックでトリガーされるか？ | `menu`（コンテキストメニュー） | — |
+
+## 重要なポイント
+
+1. **`role="menu"` はアクション用です**。ナビゲーションではありません。ナビゲーションリンクには `<nav>` を使用してください。
+2. **3つの項目ロール：** `menuitem`（アクション）、`menuitemcheckbox`（トグル）、`menuitemradio`（ラジオグループ）。
+3. **Roving tabindex** と実際のDOMフォーカス移動 — `aria-activedescendant` ではありません。
+4. **メニューナビゲーションはラップします** — 境界でクランプするlistboxとは異なります。
+5. **タイプアヘッド**により、ユーザーは最初の文字を入力して項目にジャンプできます。
+6. **無効な項目はフォーカス可能のまま** — アクティベートされないだけです。
+7. **セパレーター**は `role="separator"` を使用し、ナビゲーション中はスキップされます。
+8. **`ArrowRight` でサブメニューを開き**、`ArrowLeft` で閉じます — ネイティブOSの動作に一致。

@@ -1,0 +1,191 @@
+---
+title: "ヘッドレスSeparatorの構築"
+description: "適切なセマンティックHTML、role='separator'、aria-orientation、装飾的 vs セマンティックな使い分けを備えたSeparatorコンポーネントの構築方法を学びます。"
+order: 3
+isFree: false
+---
+
+# ヘッドレスSeparatorの構築
+
+Separatorはライブラリ全体で最もシンプルなコンポーネントですが、重要な教訓を教えてくれます：**セマンティックHTMLとARIAはオプションではない**ということです。水平線1本にもアクセシビリティ上の意味があります。
+
+## 線が単なる線ではないとき
+
+視覚的な区切り線には2種類あります：
+
+1. **セマンティック** -- コンテンツの異なるセクションを分離します。スクリーンリーダーはこれを読み上げるべきです。
+2. **装飾的** -- 純粋に視覚的なものです。スクリーンリーダーはこれを無視するべきです。
+
+`role="separator"`属性は、この要素がセクション間の境界を示すことを支援技術に伝えます。
+
+## ステップ1: Propsの定義
+
+```tsx
+import * as React from "react";
+
+interface SeparatorProps extends React.ComponentPropsWithoutRef<"div"> {
+  /**
+   * セパレーターの方向。
+   * @default "horizontal"
+   */
+  orientation?: "horizontal" | "vertical";
+  /**
+   * trueの場合、セパレーターは純粋に装飾的であり、
+   * 支援技術からは隠されます。
+   * @default false
+   */
+  decorative?: boolean;
+  /**
+   * カスタム要素レンダリング用のオプショナルなrender prop。
+   */
+  render?: React.ReactElement;
+  ref?: React.Ref<HTMLDivElement>;
+}
+```
+
+## ステップ2: コンポーネントの実装
+
+```tsx
+export function Separator({
+  orientation = "horizontal",
+  decorative = false,
+  render,
+  ref,
+  ...props
+}: SeparatorProps) {
+  // ARIA属性
+  const ariaProps = decorative
+    ? { role: "none" as const }
+    : {
+        role: "separator" as const,
+        "aria-orientation": orientation,
+      };
+
+  // スタイリング用のdata属性
+  const dataAttributes = {
+    "data-orientation": orientation,
+  };
+
+  const elementProps = {
+    ...props,
+    ref,
+    ...ariaProps,
+    ...dataAttributes,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  return <div {...elementProps} />;
+}
+```
+
+### 主な設計判断
+
+| 判断 | 理由 |
+|------|------|
+| `role="separator"` | WAI-ARIA 1.2がテーマ的な区切りのためにこのロールを定義 |
+| 装飾的な場合は`role="none"` | アクセシビリティツリーから要素を完全に除去 |
+| `aria-orientation` | コンテンツが水平に分割されているか垂直に分割されているかをスクリーンリーダーに伝達 |
+| `data-orientation` | 水平 vs 垂直のスタイリングのためのCSSフック |
+
+## ステップ3: `<hr>`の代替案
+
+HTMLにはネイティブのセパレーター要素`<hr>`があります。これは暗黙的に`role="separator"`を持ちます。`<div>`の代わりに`<hr>`でSeparatorを構築することもできます：
+
+```tsx
+export function Separator({
+  orientation = "horizontal",
+  decorative = false,
+  render,
+  ref,
+  ...props
+}: SeparatorProps) {
+  const ariaProps = decorative
+    ? { role: "none" as const, "aria-hidden": true as const }
+    : { "aria-orientation": orientation };
+
+  const elementProps = {
+    ...props,
+    ref,
+    ...ariaProps,
+    "data-orientation": orientation,
+  };
+
+  if (render) {
+    return React.cloneElement(render, elementProps);
+  }
+
+  // <hr>は暗黙的にrole="separator"を持つ
+  return <hr {...elementProps} />;
+}
+```
+
+トレードオフ：
+
+| 要素 | メリット | デメリット |
+|------|---------|-----------|
+| `<hr>` | デフォルトでセマンティック、JSなしで動作 | リセットすべきデフォルトブラウザスタイルがある |
+| `<div>` | デフォルトスタイルなし | 明示的な`role="separator"`が必要 |
+
+Base UIは明示的なロール付きの`<div>`を使用します。これは利用者にオーバーライドすべきブラウザスタイルのないクリーンな状態を提供するためです。
+
+## ステップ4: Data属性によるスタイリング
+
+```css
+.separator {
+  background-color: var(--color-border);
+}
+
+.separator[data-orientation="horizontal"] {
+  height: 1px;
+  width: 100%;
+}
+
+.separator[data-orientation="vertical"] {
+  width: 1px;
+  height: 100%;
+}
+```
+
+## ステップ5: 使用例
+
+### 水平（デフォルト）
+
+```tsx
+<nav>
+  <a href="/home">Home</a>
+  <a href="/about">About</a>
+</nav>
+<Separator />
+<main>Content here</main>
+```
+
+### 垂直（インライン）
+
+```tsx
+<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+  <span>Section A</span>
+  <Separator orientation="vertical" />
+  <span>Section B</span>
+</div>
+```
+
+### 装飾的
+
+```tsx
+{/* この線は純粋に視覚的 -- スクリーンリーダーはスキップします */}
+<Separator decorative />
+```
+
+## 全体像
+
+Separatorは些細に見えるかもしれませんが、すべてのコンポーネントで見られるパターンを確立しています：
+
+1. **セマンティックなデフォルト** -- コンポーネントはデフォルトでアクセシブル。
+2. **エスケープハッチ** -- `decorative` propにより、適切な場合に利用者がオプトアウトできる。
+3. **Data属性** -- すべてのビジュアルバリアントはクラス名ではなくデータで駆動される。
+4. **Render prop** -- 任意の要素を基盤ノードにできる。
+
+Button、Input、Separatorが完成し、**プリミティブ**モジュールをマスターしました。次はToggleとState -- 内部ステート管理が主な課題となるモジュールに進みます。

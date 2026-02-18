@@ -7,8 +7,9 @@ import {
   SandpackCodeEditor,
   SandpackTests,
 } from "@codesandbox/sandpack-react";
+import { useTranslations } from "next-intl";
 import { useExercisePersistence } from "./use-exercise-persistence";
-import type { Locale } from "@base-ui-masterclass/content";
+import { SANDPACK_THEME } from "@/lib/config/sandpack-theme";
 
 interface ExerciseSandpackProps {
   exerciseId: string;
@@ -16,7 +17,6 @@ interface ExerciseSandpackProps {
   solutionCode: string;
   testCode: string;
   hints: string[];
-  locale: Locale;
   dependencies?: Record<string, string>;
 }
 
@@ -29,7 +29,6 @@ interface ExerciseSandpackProps {
  * @param solutionCode - Reference solution (revealed on demand)
  * @param testCode - Jest test suite run by SandpackTests
  * @param hints - Progressive hints shown after failed attempts
- * @param locale - Current locale for UI text
  * @param dependencies - Additional npm dependencies for the exercise
  *
  * @example
@@ -39,7 +38,6 @@ interface ExerciseSandpackProps {
  *   solutionCode={exercise.files.solution}
  *   testCode={exercise.files.tests}
  *   hints={exercise.meta.hints.en}
- *   locale="en"
  * />
  */
 export function ExerciseSandpack({
@@ -48,9 +46,9 @@ export function ExerciseSandpack({
   solutionCode,
   testCode,
   hints,
-  locale,
   dependencies = {},
 }: ExerciseSandpackProps) {
+  const t = useTranslations("exercise");
   const [code, setCode, clearSaved, hasSavedCode] = useExercisePersistence(
     exerciseId,
     initialCode,
@@ -84,8 +82,8 @@ export function ExerciseSandpack({
             {exerciseId}
           </span>
           {hasSavedCode && !showSolution && (
-            <span className="text-[10px] text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">
-              {locale === "ja" ? "保存済み" : "saved"}
+            <span className="text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">
+              {t("saved")}
             </span>
           )}
         </div>
@@ -97,7 +95,7 @@ export function ExerciseSandpack({
               disabled={hintIndex >= hints.length - 1}
               className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-text-secondary hover:bg-surface-elevated disabled:opacity-40 transition-colors"
             >
-              {locale === "ja" ? "ヒント" : "Hint"}{" "}
+              {t("hint")}{" "}
               ({Math.min(hintIndex + 2, hints.length)}/{hints.length})
             </button>
           )}
@@ -106,20 +104,14 @@ export function ExerciseSandpack({
             onClick={handleToggleSolution}
             className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-accent hover:border-accent/40 transition-colors"
           >
-            {showSolution
-              ? locale === "ja"
-                ? "自分のコード"
-                : "My Code"
-              : locale === "ja"
-                ? "解答を見る"
-                : "Solution"}
+            {showSolution ? t("myCode") : t("solution")}
           </button>
           <button
             type="button"
             onClick={handleReset}
             className="text-xs px-3 py-1 rounded border border-border text-text-muted hover:text-error hover:border-error/40 transition-colors"
           >
-            {locale === "ja" ? "リセット" : "Reset"}
+            {t("reset")}
           </button>
         </div>
       </div>
@@ -128,7 +120,7 @@ export function ExerciseSandpack({
       {hintIndex >= 0 && (
         <div className="bg-accent/5 border-b border-accent/20 px-4 py-3">
           <div className="text-xs font-semibold text-accent mb-1">
-            {locale === "ja" ? "ヒント" : "Hint"} {hintIndex + 1}
+            {t("hint")} {hintIndex + 1}
           </div>
           <p className="text-sm text-text-secondary">{hints[hintIndex]}</p>
         </div>
@@ -160,37 +152,7 @@ export function ExerciseSandpack({
           activeFile: "/initial.tsx",
           visibleFiles: ["/initial.tsx"],
         }}
-        theme={{
-          colors: {
-            surface1: "#141416",
-            surface2: "#1c1c1f",
-            surface3: "#2a2a2e",
-            clickable: "#a1a1aa",
-            base: "#fafaf9",
-            disabled: "#71717a",
-            hover: "#e8b931",
-            accent: "#e8b931",
-            error: "#f87171",
-            errorSurface: "#450a0a",
-          },
-          syntax: {
-            plain: "#fafaf9",
-            comment: { color: "#71717a", fontStyle: "italic" },
-            keyword: "#c084fc",
-            tag: "#60a5fa",
-            punctuation: "#a1a1aa",
-            definition: "#e8b931",
-            property: "#60a5fa",
-            static: "#4ade80",
-            string: "#4ade80",
-          },
-          font: {
-            body: '"Source Serif 4", Georgia, serif',
-            mono: '"Fira Code", "JetBrains Mono", monospace',
-            size: "13px",
-            lineHeight: "1.6",
-          },
-        }}
+        theme={SANDPACK_THEME}
       >
         <SandpackLayout>
           <SandpackCodeEditor
@@ -208,9 +170,7 @@ export function ExerciseSandpack({
       {showSolution && (
         <div className="bg-success/5 border-t border-success/20 px-4 py-2 text-center">
           <span className="text-xs text-success font-semibold">
-            {locale === "ja"
-              ? "参考解答を表示中 — 自分のコードに戻すには「自分のコード」をクリック"
-              : "Showing reference solution — click \"My Code\" to return to your code"}
+            {t("solutionIndicator")}
           </span>
         </div>
       )}

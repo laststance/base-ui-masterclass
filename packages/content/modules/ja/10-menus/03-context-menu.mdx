@@ -1,0 +1,549 @@
+---
+title: "ContextMenuコンポーネントの構築"
+description: "右クリックトリガー、ポインター位置でのポジショニング、Menuと同じキーボードパターンを備えたアクセシブルなContextMenuコンポーネントを構築します。"
+order: 3
+isFree: false
+---
+
+# ContextMenuコンポーネントの構築
+
+**ContextMenu**は、ユーザーが右クリック（またはタッチデバイスでのロングプレス）したときにポインター位置に表示されるメニューです。機能的には通常のドロップダウンMenuと同一です — 同じARIAロール、同じキーボードナビゲーション、同じフォーカス管理 — ただし、トリガーメカニズムとポジショニング戦略が異なります。
+
+## ContextMenuとMenuの違い
+
+| 側面 | Menu | ContextMenu |
+|--------|------|-------------|
+| トリガー | ボタンクリック | 右クリック（`contextmenu` イベント） |
+| 位置 | トリガーボタンの下 | ポインター座標 |
+| トリガー要素 | 表示されるボタン | 不可視の領域（「ターゲット」） |
+| 開くキー | Enter/Space/ArrowDown | Shift+F10 (Windows) またはコンテキストメニューキー |
+| トリガーのARIA | `aria-haspopup="menu"` | なし（ターゲット領域は単なるコンテンツ） |
+
+メニューポップアップ自体のARIA構造は同一です：
+
+```tsx
+<ul role="menu" aria-label="File actions">
+  <li role="menuitem">Open</li>
+  <li role="menuitem">Rename</li>
+  <li role="separator" />
+  <li role="menuitem">Delete</li>
+</ul>
+```
+
+## contextmenuイベント
+
+ブラウザはユーザーが以下の操作を行ったときに `contextmenu` イベントを発火します：
+- マウスで右クリック
+- macOSで `Ctrl + クリック`
+- タッチデバイスでロングプレス
+- コンテキストメニューキーを押す（一部のキーボードの専用キー）
+- `Shift + F10` を押す（Windowsの慣例）
+
+```tsx
+const handleContextMenu = (e: React.MouseEvent) => {
+  e.preventDefault(); // ネイティブコンテキストメニューを抑制
+  setPosition({ x: e.clientX, y: e.clientY });
+  setIsOpen(true);
+};
+```
+
+<Callout type="warning">
+`contextmenu` イベントでは必ず `e.preventDefault()` を呼び出してください。これがないと、ブラウザのネイティブコンテキストメニューがカスタムメニューと一緒に表示され、紛らわしいダブルメニュー状態になります。
+</Callout>
+
+## コンポーネントAPI設計
+
+```tsx
+interface ContextMenuProps {
+  children: React.ReactNode;
+}
+
+interface ContextMenuItemProps {
+  onSelect?: () => void;
+  disabled?: boolean;
+}
+```
+
+複合コンポーネント：
+
+- **`ContextMenu.Root`** — 開閉状態、位置、フォーカスを管理します。
+- **`ContextMenu.Trigger`** — 右クリックに応答する領域。
+- **`ContextMenu.Content`** — ポップアップメニュー。
+- **`ContextMenu.Item`** — 個々のメニュー項目。
+- **`ContextMenu.Separator`** — 視覚的な仕切り。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface ContextMenuContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  position: { x: number; y: number };
+  setPosition: (pos: { x: number; y: number }) => void;
+  activeIndex: number;
+  setActiveIndex: (index: number) => void;
+  items: React.RefObject<HTMLElement[]>;
+  registerItem: (el: HTMLElement) => void;
+  menuId: string;
+  closeMenu: () => void;
+}
+
+const ContextMenuContext =
+  React.createContext<ContextMenuContextValue | null>(null);
+
+function useContextMenuContext() {
+  const ctx = React.useContext(ContextMenuContext);
+  if (!ctx)
+    throw new Error(
+      "ContextMenu components must be used within ContextMenu.Root",
+    );
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({ children }: ContextMenuProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const items = React.useRef<HTMLElement[]>([]);
+  const menuId = `context-menu-${React.useId()}`;
+
+  const registerItem = React.useCallback((el: HTMLElement) => {
+    if (!items.current.includes(el)) {
+      items.current.push(el);
+    }
+  }, []);
+
+  const closeMenu = React.useCallback(() => {
+    setIsOpen(false);
+    setActiveIndex(0);
+    items.current = [];
+  }, []);
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      position,
+      setPosition,
+      activeIndex,
+      setActiveIndex,
+      items,
+      registerItem,
+      menuId,
+      closeMenu,
+    }),
+    [isOpen, position, activeIndex, registerItem, menuId, closeMenu],
+  );
+
+  return <ContextMenuContext value={ctx}>{children}</ContextMenuContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { setIsOpen, setPosition, setActiveIndex, items } =
+    useContextMenuContext();
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setPosition({ x: e.clientX, y: e.clientY });
+    setIsOpen(true);
+    setActiveIndex(0);
+
+    requestAnimationFrame(() => {
+      items.current[0]?.focus();
+    });
+  };
+
+  return (
+    <div onContextMenu={handleContextMenu} {...props}>
+      {children}
+    </div>
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const {
+    isOpen,
+    position,
+    activeIndex,
+    setActiveIndex,
+    items,
+    menuId,
+    closeMenu,
+  } = useContextMenuContext();
+
+  const menuRef = React.useRef<HTMLUListElement>(null);
+
+  // タイプアヘッド
+  const bufferRef = React.useRef("");
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout>>();
+
+  // 外側クリックで閉じる
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const menu = document.getElementById(menuId);
+      if (menu?.contains(e.target as Node)) return;
+      closeMenu();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen, menuId, closeMenu]);
+
+  // ビューポート境界クランプ
+  const [adjustedPosition, setAdjustedPosition] = React.useState(position);
+
+  React.useEffect(() => {
+    if (!isOpen || !menuRef.current) return;
+
+    const rect = menuRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let x = position.x;
+    let y = position.y;
+
+    // 右側のオーバーフローを防止
+    if (x + rect.width > viewportWidth) {
+      x = viewportWidth - rect.width - 8;
+    }
+
+    // 下側のオーバーフローを防止
+    if (y + rect.height > viewportHeight) {
+      y = viewportHeight - rect.height - 8;
+    }
+
+    // 左端や上端からはみ出すのを防止
+    x = Math.max(8, x);
+    y = Math.max(8, y);
+
+    setAdjustedPosition({ x, y });
+  }, [isOpen, position]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const count = items.current.length;
+    if (count === 0) return;
+
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        const next = (activeIndex + 1) % count;
+        setActiveIndex(next);
+        items.current[next]?.focus();
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        const prev = (activeIndex - 1 + count) % count;
+        setActiveIndex(prev);
+        items.current[prev]?.focus();
+        break;
+      }
+      case "Home": {
+        e.preventDefault();
+        setActiveIndex(0);
+        items.current[0]?.focus();
+        break;
+      }
+      case "End": {
+        e.preventDefault();
+        const last = count - 1;
+        setActiveIndex(last);
+        items.current[last]?.focus();
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      case "Tab": {
+        e.preventDefault();
+        closeMenu();
+        break;
+      }
+      default: {
+        // タイプアヘッド
+        if (e.key.length === 1) {
+          clearTimeout(timeoutRef.current);
+          bufferRef.current += e.key.toLowerCase();
+
+          const matchIndex = items.current.findIndex((el) =>
+            el.textContent?.toLowerCase().startsWith(bufferRef.current),
+          );
+          if (matchIndex !== -1) {
+            setActiveIndex(matchIndex);
+            items.current[matchIndex]?.focus();
+          }
+
+          timeoutRef.current = setTimeout(() => {
+            bufferRef.current = "";
+          }, 500);
+        }
+      }
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <ul
+      ref={menuRef}
+      role="menu"
+      id={menuId}
+      onKeyDown={handleKeyDown}
+      style={{
+        position: "fixed",
+        left: adjustedPosition.x,
+        top: adjustedPosition.y,
+      }}
+      {...props}
+    >
+      {children}
+    </ul>
+  );
+}
+
+// --- Item ---
+
+function Item({
+  onSelect,
+  disabled = false,
+  children,
+  ...props
+}: ContextMenuItemProps & React.ComponentPropsWithoutRef<"li">) {
+  const { registerItem, closeMenu, setActiveIndex, items } =
+    useContextMenuContext();
+
+  const ref = React.useCallback(
+    (el: HTMLElement | null) => {
+      if (el) registerItem(el);
+    },
+    [registerItem],
+  );
+
+  const handleClick = () => {
+    if (disabled) return;
+    onSelect?.();
+    closeMenu();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  return (
+    <li
+      ref={ref}
+      role="menuitem"
+      tabIndex={-1}
+      aria-disabled={disabled || undefined}
+      data-disabled={disabled || undefined}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        const idx = items.current.indexOf(
+          document.activeElement as HTMLElement,
+        );
+        if (idx !== -1) setActiveIndex(idx);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+// --- Separator ---
+
+function Separator(props: React.ComponentPropsWithoutRef<"li">) {
+  return <li role="separator" {...props} />;
+}
+
+export const ContextMenu = {
+  Root,
+  Trigger,
+  Content,
+  Item,
+  Separator,
+};
+```
+
+## ポインター位置でのポジショニング
+
+ContextMenuの重要な差別化ポイントは、トリガーボタンではなくユーザーが右クリックした場所に表示されることです。`contextmenu` イベントの `clientX` と `clientY` を使って `position: fixed` でポジショニングする必要があります：
+
+```tsx
+style={{
+  position: "fixed",
+  left: position.x,
+  top: position.y,
+}}
+```
+
+### ビューポート境界クランプ
+
+ユーザーがビューポートの右下隅付近で右クリックした場合、メニューが画面外にはみ出します。実装ではメニューが完全に表示されるよう位置をクランプする必要があります：
+
+```tsx
+const clampPosition = (
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+) => {
+  const padding = 8; // ビューポート端からの間隔
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  return {
+    x: Math.min(Math.max(padding, x), vw - menuWidth - padding),
+    y: Math.min(Math.max(padding, y), vh - menuHeight - padding),
+  };
+};
+```
+
+<Callout type="tip">
+クランプするにはメニューのレンダリングサイズを測定する必要があります。2フェーズアプローチを使用してください：生の位置でメニューをレンダリングし、`getBoundingClientRect()` で測定し、その後調整します。これは単一フレーム内で行われるため、ユーザーはメニューが間違った位置にあるのを見ることはありません。
+</Callout>
+
+## タッチデバイスサポート
+
+タッチデバイスでは右クリックがありません。同等の操作は**ロングプレス** — 約500ms押し続けることです。これを実装するには、`touchstart` と `touchend` イベントをタイマーで追跡する必要があります：
+
+```tsx
+const longPressTimeout = React.useRef<ReturnType<typeof setTimeout>>();
+
+const handleTouchStart = (e: React.TouchEvent) => {
+  const touch = e.touches[0];
+
+  longPressTimeout.current = setTimeout(() => {
+    e.preventDefault();
+    setPosition({ x: touch.clientX, y: touch.clientY });
+    setIsOpen(true);
+  }, 500);
+};
+
+const handleTouchEnd = () => {
+  clearTimeout(longPressTimeout.current);
+};
+
+const handleTouchMove = () => {
+  // ユーザーが指を動かした場合はキャンセル（スクロールであり、ロングプレスではない）
+  clearTimeout(longPressTimeout.current);
+};
+```
+
+<Callout type="info">
+`touchmove` でロングプレスタイマーをキャンセルしてください — ユーザーが指を動かした場合、コンテキストメニューを開こうとしているのではなくスクロールしています。スクロール中の誤検出は、モバイルで最もフラストレーションの溜まるUXバグの一つです。
+</Callout>
+
+## フォーカス管理
+
+ContextMenuが開くと、フォーカスはメニューの最初の項目に移動します。閉じるとき、フォーカスはコンテキストメニューが開かれる前にフォーカスされていた要素に戻るべきです — 必ずしもトリガー領域ではありません：
+
+```tsx
+const previousFocusRef = React.useRef<HTMLElement | null>(null);
+
+const handleContextMenu = (e: React.MouseEvent) => {
+  e.preventDefault();
+  previousFocusRef.current = document.activeElement as HTMLElement;
+  setPosition({ x: e.clientX, y: e.clientY });
+  setIsOpen(true);
+};
+
+const closeMenu = () => {
+  setIsOpen(false);
+  previousFocusRef.current?.focus();
+};
+```
+
+通常のMenu（常にトリガーボタンにフォーカスを戻す）とのこの微妙な違いは重要です。ユーザーはトリガー領域内の任意の要素を右クリックする可能性があり、そのフォーカスは保持されるべきです。
+
+## ネイティブコンテキストメニューの競合防止
+
+カスタムコンテキストメニューを実装する際、ユーザーがカスタムコンテキストメニュー自体を右クリックするケースを処理する必要があります：
+
+```tsx
+const handleContextMenuOnMenu = (e: React.MouseEvent) => {
+  e.preventDefault(); // ネイティブメニューが上に表示されるのを防止
+  // オプションで新しいクリック位置にメニューを再配置
+};
+```
+
+## キーボードトリガーの代替手段
+
+一部のユーザーはキーボードアクセスを好みます。コンテキストメニューを開く従来のキーボードショートカットは、Windowsでは `Shift + F10` または専用のコンテキストメニューキーです：
+
+```tsx
+const handleKeyDown = (e: React.KeyboardEvent) => {
+  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+    e.preventDefault();
+    // フォーカスされた要素の近くに配置
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setPosition({ x: rect.left, y: rect.bottom });
+    setIsOpen(true);
+  }
+};
+```
+
+キーボードでトリガーされた場合、ポインター座標がないため、メニューは任意の点ではなくフォーカスされた要素の近くに配置します。
+
+## コンテキストメニューのスタイリング
+
+コンテキストメニューは通常のドロップダウンメニューと同じスタイリングを共有します。唯一の違いはポジショニング戦略です：
+
+```css
+.context-menu-content {
+  position: fixed; /* absoluteではない — ビューポート相対 */
+  z-index: 100;    /* 他のコンテンツの上 */
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.context-menu-content [role="menuitem"]:focus-visible {
+  outline: none;
+  background: var(--color-accent-subtle);
+}
+```
+
+`position: fixed`（`absolute` ではない）を使用してください。メニューの位置は親コンテナではなくビューポートに対して相対的だからです。
+
+## 重要なポイント
+
+1. **ContextMenu = 右クリックトリガー + 同じメニューパターン。** ポップアップ内のARIA構造は通常のMenuと同一です。
+2. **`contextmenu` での `e.preventDefault()`** はネイティブブラウザメニューを抑制します。
+3. **`position: fixed`** と `clientX` / `clientY` でメニューをポインター位置に配置します。
+4. **ビューポートクランプ**によりメニューが画面端からはみ出すのを防ぎます。
+5. **ロングプレス**（500ms）は右クリックのタッチ同等操作です。
+6. **フォーカス復元**は特定のトリガーではなく、以前フォーカスされていた要素に戻すべきです。
+7. **`Shift + F10`** でコンテキストメニューへのキーボードアクセスを提供します。
+8. **`touchmove` でロングプレスをキャンセル**してスクロールとの競合を回避します。
+
+## 実践してみよう
+
+<Exercise id="context-menu-basic" />

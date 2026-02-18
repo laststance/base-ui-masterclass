@@ -1,0 +1,332 @@
+---
+title: "Storybookによるドキュメント作成"
+description: "ストーリー・パー・コンポーネントアーキテクチャ、Controlsアドオン、a11yアドオン、ビジュアルリグレッションテスト、MDXドキュメントを含むStorybookでのコンポーネントライブラリのドキュメント作成方法を学びます。"
+order: 2
+isFree: false
+---
+
+# Storybookによるドキュメント作成
+
+ドキュメントのないコンポーネントライブラリは、誰にも使ってもらえないコンポーネントライブラリです。**Storybook**は、UIコンポーネントを分離して開発、ドキュメント化、テストするための業界標準ツールです。各コンポーネントをさまざまなpropsでレンダリングし、アクセシビリティをテストし、インタラクティブな例でドキュメント化できる専用環境を提供します。
+
+## なぜStorybookか？
+
+| メリット | 説明 |
+|---------|-------------|
+| **分離された開発** | ルーティングやステート管理のオーバーヘッドなしに、アプリの外でコンポーネントを開発 |
+| **生きたドキュメント** | ストーリーがドキュメントと実行可能な例の両方として機能 |
+| **アドオンエコシステム** | アクセシビリティテスト、ビジュアルリグレッション、コントロール、レスポンシブビューポート |
+| **フレームワーク非依存** | React、Vue、Svelte、Angularなどで動作 |
+| **MDXサポート** | インタラクティブなストーリーと長文ドキュメントを併記 |
+
+## Storybookのセットアップ
+
+プロジェクトにStorybookを初期化します：
+
+```bash
+pnpm dlx storybook@latest init
+```
+
+これにより、設定ファイルとサンプルストーリーを含む `.storybook/` ディレクトリが生成されます。コンポーネントライブラリ向けに、ストーリーのパスをソースに向けて設定します：
+
+```tsx
+// .storybook/main.ts
+import type { StorybookConfig } from "@storybook/react-vite";
+
+const config: StorybookConfig = {
+  stories: ["../src/**/*.stories.@(ts|tsx)", "../src/**/*.mdx"],
+  addons: [
+    "@storybook/addon-essentials",
+    "@storybook/addon-a11y",
+    "@storybook/addon-interactions",
+  ],
+  framework: {
+    name: "@storybook/react-vite",
+    options: {},
+  },
+};
+
+export default config;
+```
+
+## ストーリー・パー・コンポーネントアーキテクチャ
+
+各コンポーネントはソースと同じ場所に独自のストーリーファイルを持ちます：
+
+```
+src/
+  button/
+    index.ts        # コンポーネントソース
+    Button.stories.tsx  # ストーリー
+  slider/
+    index.ts
+    Slider.stories.tsx
+  tabs/
+    index.ts
+    Tabs.stories.tsx
+```
+
+ストーリーファイルは1つ以上の「ストーリー」を定義します — コンポーネントの特定の状態や設定です：
+
+```tsx
+// src/button/Button.stories.tsx
+import type { Meta, StoryObj } from "@storybook/react";
+import { Button } from "./index";
+
+const meta: Meta<typeof Button> = {
+  title: "Components/Button",
+  component: Button,
+  tags: ["autodocs"],
+  argTypes: {
+    disabled: { control: "boolean" },
+    children: { control: "text" },
+  },
+};
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {
+  args: {
+    children: "Click me",
+  },
+};
+
+export const Disabled: Story = {
+  args: {
+    children: "Disabled",
+    disabled: true,
+  },
+};
+
+export const AsLink: Story = {
+  args: {
+    children: "Link Button",
+    render: <a href="#" />,
+  },
+};
+```
+
+### `tags: ["autodocs"]` パターン
+
+`autodocs` タグは、ストーリーとコンポーネントのpropsからドキュメントページを自動生成するようStorybookに指示します。TypeScriptのinterfaceとJSDocコメントを抽出してpropsテーブルを生成します。
+
+## Controlsアドオン
+
+**Controls**アドオンは、コンポーネントのpropsからインタラクティブなコントロールを生成します。コンシューマーはリアルタイムでpropsを調整してコンポーネントの動作を探索できます：
+
+```tsx
+const meta: Meta<typeof Slider.Root> = {
+  title: "Components/Slider",
+  component: Slider.Root,
+  argTypes: {
+    min: { control: { type: "number", min: 0, max: 100, step: 1 } },
+    max: { control: { type: "number", min: 0, max: 1000, step: 10 } },
+    step: { control: { type: "number", min: 1, max: 50 } },
+    defaultValue: { control: { type: "number", min: 0, max: 100 } },
+    disabled: { control: "boolean" },
+    orientation: {
+      control: "radio",
+      options: ["horizontal", "vertical"],
+    },
+  },
+};
+```
+
+<Callout type="tip">
+複合コンポーネントの場合、すべてのパーツを組み立てるラッパー「テンプレート」コンポーネントを作成してください。テンプレートの `argTypes` を使用して、すべてのサブコンポーネントのpropsを一か所で公開します。
+</Callout>
+
+### 複合コンポーネント用テンプレートパターン
+
+```tsx
+function SliderTemplate(args: {
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+  disabled: boolean;
+  orientation: "horizontal" | "vertical";
+}) {
+  return (
+    <Slider.Root {...args}>
+      <Slider.Track className="slider-track">
+        <Slider.Range className="slider-range" />
+      </Slider.Track>
+      <Slider.Thumb className="slider-thumb" />
+    </Slider.Root>
+  );
+}
+
+export const Horizontal: Story = {
+  render: (args) => <SliderTemplate {...args} />,
+  args: {
+    min: 0,
+    max: 100,
+    step: 1,
+    defaultValue: 50,
+    disabled: false,
+    orientation: "horizontal",
+  },
+};
+```
+
+## アクセシビリティアドオン
+
+**a11yアドオン**は、すべてのストーリーで[axe-core](https://github.com/dequelabs/axe-core)アクセシビリティ監査を実行します。WCAG違反をStorybook UI上で直接表示します：
+
+```bash
+pnpm add -D @storybook/addon-a11y
+```
+
+```tsx
+// .storybook/main.ts
+addons: [
+  "@storybook/addon-essentials",
+  "@storybook/addon-a11y",  // これを追加
+],
+```
+
+インストールすると、すべてのストーリーに自動監査結果を含む「Accessibility」パネルが表示されます。検出される一般的な問題：
+
+| 違反 | 例 |
+|-----------|---------|
+| アクセシブル名の欠落 | テキストも `aria-label` もないボタン |
+| 不十分な色コントラスト | テキスト色が背景色に近すぎる |
+| フォームラベルの欠落 | 対応するラベルのないinput |
+| 無効なARIA属性 | `role="slider"` なしの `aria-valuenow` |
+
+<Callout type="warning">
+自動アクセシビリティテストはWCAG問題の約30-50%をキャッチします。キーボード操作フロー、フォーカス管理、スクリーンリーダーの読み上げ品質はテストできません。スクリーンリーダーを使った手動テストは依然として不可欠です。
+</Callout>
+
+### ストーリーごとのa11y設定
+
+ストーリーごとにアクセシビリティルールをカスタマイズできます：
+
+```tsx
+export const CustomColors: Story = {
+  args: { /* ... */ },
+  parameters: {
+    a11y: {
+      config: {
+        rules: [
+          { id: "color-contrast", enabled: false }, // このストーリーでは無効化
+        ],
+      },
+    },
+  },
+};
+```
+
+## ビジュアルリグレッションテスト
+
+ビジュアルリグレッションテストは、各ストーリーのスクリーンショットをキャプチャし、ベースライン画像と比較します。ユニットテストでは見逃す意図しない視覚的変更を検出します。
+
+### Chromatic統合
+
+[Chromatic](https://www.chromatic.com/) はStorybook専用のビジュアルテストサービスです：
+
+```bash
+pnpm add -D chromatic
+
+# ビジュアルテストを実行
+pnpm chromatic --project-token=<your-token>
+```
+
+Chromaticはすべてのストーリーのスクリーンショットをキャプチャし、最後に承認されたベースラインと比較し、差分をレビュー用にフラグ付けします。CIで実行され、GitHubプルリクエストと統合されます。
+
+### セルフホスト型の代替手段
+
+セルフホスト型のビジュアルリグレッションには、[Playwright](https://playwright.dev/) とStorybookを使用します：
+
+```tsx
+// tests/visual/slider.spec.ts
+import { test, expect } from "@playwright/test";
+
+test("slider default state", async ({ page }) => {
+  await page.goto(
+    "http://localhost:6006/iframe.html?id=components-slider--horizontal"
+  );
+  await expect(page).toHaveScreenshot("slider-horizontal.png");
+});
+
+test("slider disabled state", async ({ page }) => {
+  await page.goto(
+    "http://localhost:6006/iframe.html?id=components-slider--disabled"
+  );
+  await expect(page).toHaveScreenshot("slider-disabled.png");
+});
+```
+
+## MDXドキュメントページ
+
+自動生成ドキュメントの先に、MDXで豊富なドキュメントページを書くことができます。Markdownの散文とライブコンポーネント例を組み合わせます：
+
+```mdx
+{/* src/slider/Slider.mdx */}
+import { Meta, Story, Canvas, Controls } from "@storybook/blocks";
+import * as SliderStories from "./Slider.stories";
+
+<Meta of={SliderStories} />
+
+# Slider
+
+Sliderは、トラックに沿ってサムをドラッグすることで数値を選択するコンポーネントです。
+
+## 使い方
+
+<Canvas of={SliderStories.Horizontal} />
+<Controls of={SliderStories.Horizontal} />
+
+## キーボードナビゲーション
+
+| キー | アクション |
+|-----|--------|
+| ArrowRight | stepずつインクリメント |
+| ArrowLeft | stepずつデクリメント |
+| Home | 最小値に設定 |
+| End | 最大値に設定 |
+
+## アクセシビリティ
+
+サム要素は `role="slider"` を使用し、`aria-valuenow`、`aria-valuemin`、
+`aria-valuemax` 属性を持ちます。
+```
+
+これにより、コンシューマーが直接操作できるライブのインタラクティブな例を含む、洗練されたドキュメントページが生成されます。
+
+## Storybookの整理
+
+ストーリータイトルには論理的な階層を使用します：
+
+```tsx
+// プリミティブ
+{ title: "Primitives/Button" }
+{ title: "Primitives/Input" }
+
+// トグル＆ステート
+{ title: "Toggle/Switch" }
+{ title: "Toggle/Checkbox" }
+
+// ナビゲーション
+{ title: "Navigation/Tabs" }
+{ title: "Navigation/Toolbar" }
+
+// アドバンスド
+{ title: "Advanced/Slider" }
+{ title: "Advanced/NumberField" }
+{ title: "Advanced/Toast" }
+```
+
+これにより、コンポーネントライブラリのモジュール構造を反映するサイドバーナビゲーションが作成されます。
+
+## 重要なポイント
+
+1. **コンポーネントごとに1つのストーリーファイル**、ソースコードと同じ場所に配置。
+2. **`autodocs`** を使用して、TypeScript interfaceからpropsテーブルを自動生成。
+3. **Controlsアドオン**ですべてのpropsをインタラクティブに — 複合コンポーネントには不可欠。
+4. **a11yアドオン**ですべてのストーリーでaxe-coreを実行し、WCAG違反を早期に発見。
+5. **ビジュアルリグレッションテスト**（ChromaticまたはPlaywright）で意図しない視覚的変更を検出。
+6. **MDXドキュメント**で散文とライブ例を組み合わせた豊富で人間が読めるドキュメントを作成。
+7. **自動a11yテストは必要だが十分ではない** — 必ずスクリーンリーダーによる手動テストで補完してください。

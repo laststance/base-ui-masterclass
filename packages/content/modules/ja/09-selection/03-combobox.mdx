@@ -1,0 +1,539 @@
+---
+title: "Comboboxコンポーネントの構築"
+description: "入力フィルタリング、aria-autocomplete、aria-expanded、ハイライトされたマッチ表示を備えたアクセシブルなCombobox/Autocompleteを構築します。"
+order: 3
+isFree: false
+---
+
+# Comboboxコンポーネントの構築
+
+**Combobox**（Autocompleteとも呼ばれる）はテキスト入力とポップアップListboxを組み合わせ、ユーザーが入力してオプションをフィルタリングできるようにします。入力フォーカス、リアルタイムフィルタリング、ポップアップ内のキーボードナビゲーション、スクリーンリーダーへの読み上げをすべて同時に調整する必要があるため、最も複雑なARIAパターンの1つです。
+
+## ComboboxとSelectの違い
+
+| 側面 | Select | Combobox |
+|------|--------|----------|
+| トリガー要素 | ボタン | テキスト入力 |
+| ユーザーが入力可能 | いいえ | はい — オプションをフィルタリング |
+| `aria-autocomplete` | 使用しない | `"list"`、`"inline"`、または`"both"` |
+| フィルタリング | なし | はい — ユーザーの入力に応じてオプションが減少 |
+| 値のクリア | 「なし」オプションを選択 | 入力テキストを削除 |
+| 自由入力 | いいえ | 実装に依存 |
+
+## ARIA Roleと属性
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `role="combobox"` | テキスト入力 | comboboxとして識別 |
+| `aria-haspopup="listbox"` | テキスト入力 | Listboxが表示されることを読み上げ |
+| `aria-expanded` | テキスト入力 | ポップアップが開いているか |
+| `aria-controls` | テキスト入力 | ポップアップListboxの`id`を指す |
+| `aria-activedescendant` | テキスト入力 | ハイライトされたオプションの`id`を指す |
+| `aria-autocomplete` | テキスト入力 | オートコンプリートの動作を説明 |
+| `role="listbox"` | ポップアップコンテナ | フィルタリングされたオプションをグループ化 |
+| `role="option"` | 各オプション | 選択可能なオプションとして識別 |
+
+### aria-autocompleteの値
+
+| 値 | 意味 |
+|-----|------|
+| `"list"` | サジェストのポップアップリストが表示、ユーザーの入力は補完されない |
+| `"inline"` | テキストが入力内でインラインに自動補完、ポップアップなし |
+| `"both"` | ポップアップが表示され、かつテキストがインラインで補完 |
+| `"none"` | オートコンプリート動作なし |
+
+ほとんどの実装では`"list"`が正しい値です — 入力がサジェストのポップアップリストをフィルタリングします。
+
+```tsx
+<input
+  role="combobox"
+  aria-haspopup="listbox"
+  aria-expanded={isOpen}
+  aria-controls="suggestions-listbox"
+  aria-activedescendant={highlightedOptionId}
+  aria-autocomplete="list"
+  value={inputValue}
+  onChange={(e) => setInputValue(e.target.value)}
+/>
+<ul role="listbox" id="suggestions-listbox">
+  {filteredOptions.map((opt) => (
+    <li role="option" id={opt.id} aria-selected={opt.isSelected}>
+      {opt.label}
+    </li>
+  ))}
+</ul>
+```
+
+## キーボードインタラクション
+
+| キー | ポップアップが閉じている | ポップアップが開いている |
+|------|----------------------|----------------------|
+| 入力 | ポップアップを開き、オプションをフィルタリング | オプションをフィルタリング |
+| `ArrowDown` | ポップアップを開き、最初のオプションをハイライト | 次のオプションをハイライト |
+| `ArrowUp` | ポップアップを開き、最後のオプションをハイライト | 前のオプションをハイライト |
+| `Home` | カーソルを入力の先頭に | 最初のオプションをハイライト |
+| `End` | カーソルを入力の末尾に | 最後のオプションをハイライト |
+| `Enter` | — | ハイライトされたオプションを選択、ポップアップを閉じる |
+| `Escape` | 入力をクリア | ポップアップを閉じる（入力値は保持） |
+| `Tab` | — | ポップアップを閉じる（オプションでハイライトを選択） |
+
+<Callout type="tip">
+Selectとは異なり、DOMフォーカスは**常にテキスト入力に留まります**。ユーザーは入力しながら同時に矢印キーでポップアップをナビゲートします。これが`aria-activedescendant`が不可欠な理由です — 視覚的なハイライトをDOMフォーカスから切り離します。
+</Callout>
+
+## コンポーネントAPI設計
+
+```tsx
+interface ComboboxProps {
+  value?: string;
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+  placeholder?: string;
+}
+
+interface ComboboxOptionProps {
+  value: string;
+  disabled?: boolean;
+}
+```
+
+コンパウンドコンポーネント：
+
+- **`Combobox.Root`** — 開閉状態、入力値、選択された値、ハイライトされたインデックスを管理。
+- **`Combobox.Input`** — `role="combobox"`を持つテキスト入力。
+- **`Combobox.Content`** — ポップアップListbox。
+- **`Combobox.Option`** — 個々のフィルタリング可能なオプション。
+- **`Combobox.Empty`** — フィルターに一致するオプションがないときに表示。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface ComboboxContextValue {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  inputValue: string;
+  setInputValue: (value: string) => void;
+  selectedValue: string;
+  selectValue: (value: string, label: string) => void;
+  highlightedIndex: number;
+  setHighlightedIndex: (index: number) => void;
+  filteredOptions: { value: string; label: string; id: string }[];
+  registerOption: (value: string, label: string, id: string) => void;
+  listboxId: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+}
+
+const ComboboxContext = React.createContext<ComboboxContextValue | null>(null);
+
+function useComboboxContext() {
+  const ctx = React.useContext(ComboboxContext);
+  if (!ctx) throw new Error("Combobox components must be used within Combobox.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  value: controlledValue,
+  defaultValue = "",
+  onValueChange,
+  children,
+}: ComboboxProps & { children: React.ReactNode }) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [inputValue, setInputValue] = React.useState("");
+  const [selectedValue, setSelectedValue] = React.useState(
+    controlledValue ?? defaultValue,
+  );
+  const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  const allOptions = React.useRef<{ value: string; label: string; id: string }[]>([]);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const listboxId = `combobox-listbox-${React.useId()}`;
+
+  const current = controlledValue ?? selectedValue;
+
+  const filteredOptions = React.useMemo(() => {
+    if (!inputValue) return allOptions.current;
+    return allOptions.current.filter((opt) =>
+      opt.label.toLowerCase().includes(inputValue.toLowerCase()),
+    );
+  }, [inputValue]);
+
+  const selectValue = React.useCallback(
+    (val: string, label: string) => {
+      if (controlledValue === undefined) setSelectedValue(val);
+      setInputValue(label);
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+      onValueChange?.(val);
+      inputRef.current?.focus();
+    },
+    [controlledValue, onValueChange],
+  );
+
+  const registerOption = React.useCallback(
+    (value: string, label: string, id: string) => {
+      const exists = allOptions.current.find((o) => o.value === value);
+      if (!exists) {
+        allOptions.current.push({ value, label, id });
+      }
+    },
+    [],
+  );
+
+  const ctx = React.useMemo(
+    () => ({
+      isOpen,
+      setIsOpen,
+      inputValue,
+      setInputValue,
+      selectedValue: current,
+      selectValue,
+      highlightedIndex,
+      setHighlightedIndex,
+      filteredOptions,
+      registerOption,
+      listboxId,
+      inputRef,
+    }),
+    [
+      isOpen, inputValue, current, selectValue,
+      highlightedIndex, filteredOptions, registerOption, listboxId,
+    ],
+  );
+
+  return <ComboboxContext value={ctx}>{children}</ComboboxContext>;
+}
+
+// --- Input ---
+
+function Input(props: React.ComponentPropsWithoutRef<"input">) {
+  const {
+    isOpen,
+    setIsOpen,
+    inputValue,
+    setInputValue,
+    highlightedIndex,
+    setHighlightedIndex,
+    filteredOptions,
+    selectValue,
+    listboxId,
+    inputRef,
+  } = useComboboxContext();
+
+  const activeDescendant =
+    highlightedIndex >= 0
+      ? filteredOptions[highlightedIndex]?.id
+      : undefined;
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+    setIsOpen(true);
+    setHighlightedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    switch (e.key) {
+      case "ArrowDown": {
+        e.preventDefault();
+        if (!isOpen) {
+          setIsOpen(true);
+          setHighlightedIndex(0);
+        } else {
+          setHighlightedIndex(
+            Math.min(highlightedIndex + 1, filteredOptions.length - 1),
+          );
+        }
+        break;
+      }
+      case "ArrowUp": {
+        e.preventDefault();
+        if (!isOpen) {
+          setIsOpen(true);
+          setHighlightedIndex(filteredOptions.length - 1);
+        } else {
+          setHighlightedIndex(Math.max(highlightedIndex - 1, 0));
+        }
+        break;
+      }
+      case "Home": {
+        if (isOpen) {
+          e.preventDefault();
+          setHighlightedIndex(0);
+        }
+        break;
+      }
+      case "End": {
+        if (isOpen) {
+          e.preventDefault();
+          setHighlightedIndex(filteredOptions.length - 1);
+        }
+        break;
+      }
+      case "Enter": {
+        e.preventDefault();
+        if (isOpen && highlightedIndex >= 0) {
+          const opt = filteredOptions[highlightedIndex];
+          selectValue(opt.value, opt.label);
+        }
+        break;
+      }
+      case "Escape": {
+        e.preventDefault();
+        if (isOpen) {
+          setIsOpen(false);
+        } else {
+          setInputValue("");
+        }
+        break;
+      }
+    }
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      role="combobox"
+      type="text"
+      aria-haspopup="listbox"
+      aria-expanded={isOpen}
+      aria-controls={listboxId}
+      aria-activedescendant={activeDescendant}
+      aria-autocomplete="list"
+      value={inputValue}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        if (inputValue) setIsOpen(true);
+      }}
+      {...props}
+    />
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"ul">) {
+  const { isOpen, listboxId, highlightedIndex, filteredOptions } =
+    useComboboxContext();
+
+  // ハイライトされたオプションをビューにスクロール
+  React.useEffect(() => {
+    if (!isOpen || highlightedIndex < 0) return;
+    const optionId = filteredOptions[highlightedIndex]?.id;
+    if (optionId) {
+      document.getElementById(optionId)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [isOpen, highlightedIndex, filteredOptions]);
+
+  if (!isOpen) return null;
+
+  return (
+    <ul role="listbox" id={listboxId} {...props}>
+      {children}
+    </ul>
+  );
+}
+
+// --- Option ---
+
+function Option({
+  value,
+  children,
+  disabled = false,
+  ...props
+}: ComboboxOptionProps & React.ComponentPropsWithoutRef<"li">) {
+  const {
+    selectedValue,
+    selectValue,
+    highlightedIndex,
+    setHighlightedIndex,
+    filteredOptions,
+    registerOption,
+    inputValue,
+  } = useComboboxContext();
+
+  const optionId = `combobox-option-${React.useId()}`;
+  const label = typeof children === "string" ? children : value;
+
+  React.useEffect(() => {
+    registerOption(value, label, optionId);
+  }, [value, label, optionId, registerOption]);
+
+  // filteredOptionsでフィルタリング済み — Rootのメモと一致するかチェック
+  const index = filteredOptions.findIndex((o) => o.value === value);
+  if (index === -1) return null;
+  const isSelected = selectedValue === value;
+  const isHighlighted = highlightedIndex === index;
+
+  return (
+    <li
+      role="option"
+      id={optionId}
+      aria-selected={isSelected}
+      aria-disabled={disabled || undefined}
+      data-highlighted={isHighlighted || undefined}
+      data-state={isSelected ? "selected" : undefined}
+      onClick={() => {
+        if (!disabled) selectValue(value, label);
+      }}
+      onPointerMove={() => {
+        if (!disabled) setHighlightedIndex(index);
+      }}
+      {...props}
+    >
+      {children}
+    </li>
+  );
+}
+
+// --- Empty ---
+
+function Empty({ children }: { children: React.ReactNode }) {
+  const { filteredOptions, isOpen } = useComboboxContext();
+  if (!isOpen || filteredOptions.length > 0) return null;
+  return <li role="presentation">{children}</li>;
+}
+
+export const Combobox = { Root, Input, Content, Option, Empty };
+```
+
+## マッチテキストのハイライト
+
+Comboboxで最も満足度の高いUXディテールの1つは、各オプション内でユーザーの入力に一致する部分を太字にすることです。これにより、フィルタリングが機能していることへの即座の視覚的フィードバックを提供します：
+
+```tsx
+function HighlightMatch({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}) {
+  if (!query) return <>{text}</>;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const startIndex = lowerText.indexOf(lowerQuery);
+
+  if (startIndex === -1) return <>{text}</>;
+
+  const before = text.slice(0, startIndex);
+  const match = text.slice(startIndex, startIndex + query.length);
+  const after = text.slice(startIndex + query.length);
+
+  return (
+    <>
+      {before}
+      <mark>{match}</mark>
+      {after}
+    </>
+  );
+}
+```
+
+オプション内での使用方法：
+
+```tsx
+<Combobox.Option value="javascript">
+  <HighlightMatch text="JavaScript" query={inputValue} />
+</Combobox.Option>
+```
+
+<Callout type="info">
+`<mark>`要素は検索マッチのハイライトに意味的に正しい要素です。スクリーンリーダーはマークされたテキストの前後に「ハイライト」と読み上げ、理解を助けます。
+</Callout>
+
+## ライブリージョンのアナウンス
+
+フィルタリングされた結果の数が変わると、スクリーンリーダーユーザーはその情報を知る必要があります。結果数を読み上げる`aria-live`リージョンを追加します：
+
+```tsx
+function ResultsAnnouncement({ count }: { count: number }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="sr-only"
+    >
+      {count === 0
+        ? "No results found"
+        : `${count} result${count === 1 ? "" : "s"} available`}
+    </div>
+  );
+}
+```
+
+このパターンはアクセシビリティに不可欠です — これがないと、スクリーンリーダーユーザーは入力が結果を生成したかどうかわかりません。
+
+## フィルタリング戦略
+
+| 戦略 | 説明 | 使用場面 |
+|------|------|---------|
+| `startsWith` | 文字列の先頭からマッチ | 短いリスト、予測可能なラベル |
+| `includes` | 文字列内の任意の位置でマッチ | 汎用、最も一般的 |
+| `fuzzy` | 非連続文字のマッチ | 大規模データセット、IDE風の検索 |
+
+```tsx
+// startsWith
+options.filter((o) => o.label.toLowerCase().startsWith(query));
+
+// includes
+options.filter((o) => o.label.toLowerCase().includes(query));
+
+// fuzzy（シンプルなアプローチ）
+function fuzzyMatch(text: string, query: string): boolean {
+  let queryIdx = 0;
+  for (let i = 0; i < text.length && queryIdx < query.length; i++) {
+    if (text[i].toLowerCase() === query[queryIdx].toLowerCase()) {
+      queryIdx++;
+    }
+  }
+  return queryIdx === query.length;
+}
+```
+
+<Callout type="warning">
+大規模データセット（1000件以上のオプション）では、フィルター操作のデバウンスやオプションリストの仮想化を検討してください。入力のカクつきを避けるためです。`useDeferredValue`はこの目的に適したツールです — 入力のレスポンシブ性を優先しながら、フィルタリングされたリストの再レンダリングを遅延させます。
+</Callout>
+
+## 自由入力の処理
+
+一部のCombobox実装では、ユーザーがどのオプションにも一致しない値を送信できます。これをサポートするには、ユーザーがEnterを押すか入力をblurしたときに、入力がオプションに一致するかをチェックします：
+
+```tsx
+const handleBlur = () => {
+  const match = options.find(
+    (o) => o.label.toLowerCase() === inputValue.toLowerCase(),
+  );
+  if (match) {
+    selectValue(match.value, match.label);
+  } else if (allowCustomValues) {
+    onValueChange?.(inputValue);
+  } else {
+    // 最後の有効な選択にリセット
+    setInputValue(selectedLabel);
+  }
+};
+```
+
+## 重要なポイント
+
+1. **Combobox = テキスト入力（`combobox`）+ ポップアップ（`listbox`）。** DOMフォーカスは入力から離れません。
+2. **`aria-autocomplete="list"`**はスクリーンリーダーに、ユーザーの入力に応じてサジェストリストが表示されることを伝えます。
+3. **`aria-activedescendant`**を入力に設定し、フォーカスを移動せずにハイライトされたオプションを伝えます。
+4. **フィルタリング**は各キーストロークで実行されます — 汎用マッチングには`includes`を使用します。
+5. **マッチテキストのハイライト**は`<mark>`で視覚的フィードバックを提供します。
+6. **ライブリージョンのアナウンス**（`aria-live="polite"`）でスクリーンリーダーユーザーに結果数の変更を通知します。
+7. **Escape**はポップアップが開いているときは閉じ、閉じているときは入力をクリア — 2段階の動作です。
+
+## 自分で試してみよう
+
+<Exercise id="combobox-basic" />

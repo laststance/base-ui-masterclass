@@ -1,0 +1,455 @@
+---
+title: "Popoverコンポーネントの構築"
+description: "クリックトリガー、フォーカス管理、外側クリックとEscapeでの閉じる動作、aria-expandedを備えたアクセシブルなPopoverコンポーネントの構築方法を学びます。"
+order: 3
+isFree: false
+---
+
+# Popoverコンポーネントの構築
+
+**Popover**はトリガー要素にアンカーされたインタラクティブなオーバーレイです。Tooltip（非インタラクティブでホバーでトリガー）とは異なり、Popoverはクリックで開かれ、フォーム、ボタン、リンクなどのリッチなインタラクティブコンテンツを含むことができます。
+
+## TooltipとPopoverの違い
+
+この区別を理解することはARIAセマンティクス、インタラクションモデル、フォーカス管理を決定するため非常に重要です：
+
+| 特性 | Tooltip | Popover |
+|------|---------|---------|
+| トリガー | ホバー / フォーカス | クリック |
+| コンテンツ | テキストのみ | インタラクティブなコンテンツ（ボタン、リンク、フォーム） |
+| ARIA role | `tooltip` | なし（複雑なものには`dialog`） |
+| ARIAリンク | `aria-describedby` | `aria-expanded` + `aria-controls` |
+| フォーカス | トリガーに留まる | Popover内に移動 |
+| インタラクティブ | いいえ（`pointer-events: none`） | はい |
+| 閉じる方法 | マウス離脱 / blur | 外側クリック / Escape |
+
+## ARIAセマンティクス
+
+シンプルなPopoverの場合、重要なARIA属性は**トリガー**に設定します：
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `aria-expanded` | トリガーボタン | 開いているとき`"true"`、閉じているとき`"false"` |
+| `aria-controls` | トリガーボタン | PopoverのIDを指す |
+| `aria-haspopup` | トリガーボタン | ボタンがポップアップを開くことを示す |
+| `id` | Popover要素 | `aria-controls`が参照する値 |
+
+```tsx
+<button
+  aria-expanded="true"
+  aria-controls="popover-1"
+  aria-haspopup="dialog"
+>
+  Settings
+</button>
+<div id="popover-1" role="dialog" aria-label="Settings">
+  Popover content with interactive elements...
+</div>
+```
+
+<Callout type="info">
+フォーカスをトラップするインタラクティブなコンテンツを含むPopoverには、`role="dialog"`を追加するのが適切です。よりシンプルなPopover（日付ピッカーのドロップダウンなど）では、roleを省略するか、より具体的なものを使用できます。重要な要件は常にトリガーの`aria-expanded`です。
+</Callout>
+
+## インタラクションモデル
+
+### 開く動作
+
+Popoverはユーザーがトリガーを**クリック**すると開きます。Tooltipとは異なり、ホバーではPopoverは開きません — 誤った操作を防ぐためです。
+
+### フォーカス管理
+
+Popoverが開くと、フォーカスはPopover内の**最初のフォーカス可能な要素**に移動するか、フォーカス可能な子要素がない場合はPopoverコンテナ自体に移動すべきです。これはキーボードユーザーにとって不可欠で、そうしないとPopoverが表示されたことに気づけません。
+
+```tsx
+function focusFirstElement(container: HTMLElement) {
+  const focusableSelectors = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(", ");
+
+  const firstFocusable = container.querySelector<HTMLElement>(focusableSelectors);
+  if (firstFocusable) {
+    firstFocusable.focus();
+  } else {
+    container.focus();
+  }
+}
+```
+
+### 閉じる動作
+
+Popoverは以下の方法で閉じることができます：
+
+| 操作 | 仕組み |
+|------|--------|
+| **Escapeキー** | documentの`keydown`リスナー |
+| **外側クリック** | documentの`mousedown`リスナー |
+| **トリガーの再クリック** | トリガーのトグル動作 |
+
+Popoverが閉じるとき、フォーカスはトリガー要素に戻る必要があります。これは重要なアクセシビリティ要件です — フォーカスを失うとキーボードユーザーが迷子になります。
+
+### 外側クリックの検出
+
+Popoverの外側のクリックを検出するには、クリックターゲットがPopoverまたはトリガー内にあるかを確認する必要があります：
+
+```tsx
+React.useEffect(() => {
+  if (!open) return;
+
+  function handleMouseDown(e: MouseEvent) {
+    const target = e.target as Node;
+    const isInsidePopover = popoverRef.current?.contains(target);
+    const isInsideTrigger = triggerRef.current?.contains(target);
+
+    if (!isInsidePopover && !isInsideTrigger) {
+      close();
+    }
+  }
+
+  document.addEventListener("mousedown", handleMouseDown);
+  return () => document.removeEventListener("mousedown", handleMouseDown);
+}, [open, close]);
+```
+
+<Callout type="warning">
+外側クリック検出には`click`ではなく`mousedown`を使用してください。`click`イベントは`mouseup`の後に発火するため、ユーザーがPopover内でクリックを開始して外側でリリースした場合（またはその逆）、動作が予測不能になります。`mousedown`は即座で確定的な検出を提供します。
+</Callout>
+
+## コンポーネントAPI設計
+
+```tsx
+interface PopoverProps {
+  open?: boolean;                 // 制御されたopen状態
+  defaultOpen?: boolean;          // 非制御のデフォルト値
+  onOpenChange?: (open: boolean) => void;
+  placement?: Placement;          // Floating UIのplacement
+}
+```
+
+コンパウンドコンポーネント：
+
+- **`Popover.Root`** — 開閉状態を管理し、contextを提供。
+- **`Popover.Trigger`** — Popoverをトグルするボタン。
+- **`Popover.Content`** — Portalを通じてレンダリングされるフローティングPopoverパネル。
+- **`Popover.Close`** — Popover内のオプションの閉じるボタン。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+  type Placement,
+} from "@floating-ui/react";
+import { createPortal } from "react-dom";
+
+// --- Context ---
+
+interface PopoverContextValue {
+  open: boolean;
+  toggle: () => void;
+  close: () => void;
+  popoverId: string;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  refs: ReturnType<typeof useFloating>["refs"];
+  floatingStyles: React.CSSProperties;
+}
+
+const PopoverContext = React.createContext<PopoverContextValue | null>(null);
+
+function usePopoverContext() {
+  const ctx = React.useContext(PopoverContext);
+  if (!ctx) throw new Error("Popover components must be used within Popover.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  placement = "bottom",
+  children,
+}: PopoverProps & { children: React.ReactNode }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const popoverId = React.useId();
+
+  const setOpen = React.useCallback(
+    (nextOpen: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(nextOpen);
+      onOpenChange?.(nextOpen);
+    },
+    [controlledOpen, onOpenChange],
+  );
+
+  const toggle = React.useCallback(() => setOpen(!open), [setOpen, open]);
+  const close = React.useCallback(() => setOpen(false), [setOpen]);
+
+  const { refs, floatingStyles } = useFloating({
+    open,
+    placement,
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  const ctx = React.useMemo(
+    () => ({ open, toggle, close, popoverId, triggerRef, refs, floatingStyles }),
+    [open, toggle, close, popoverId, triggerRef, refs, floatingStyles],
+  );
+
+  return <PopoverContext value={ctx}>{children}</PopoverContext>;
+}
+
+// --- Trigger ---
+
+function Trigger({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { open, toggle, popoverId, triggerRef, refs } = usePopoverContext();
+
+  const ref = React.useCallback(
+    (el: HTMLButtonElement | null) => {
+      triggerRef.current = el;
+      refs.setReference(el);
+    },
+    [triggerRef, refs],
+  );
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-expanded={open}
+      aria-controls={open ? popoverId : undefined}
+      aria-haspopup="dialog"
+      onClick={toggle}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Content ---
+
+function Content({
+  children,
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"div">) {
+  const { open, close, popoverId, triggerRef, refs, floatingStyles } =
+    usePopoverContext();
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
+
+  // refのマージ
+  const setRefs = React.useCallback(
+    (el: HTMLDivElement | null) => {
+      contentRef.current = el;
+      refs.setFloating(el);
+    },
+    [refs],
+  );
+
+  // 開いたとき最初のフォーカス可能な要素にフォーカス
+  React.useEffect(() => {
+    if (!open || !contentRef.current) return;
+
+    const focusableSelectors = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(", ");
+
+    const firstFocusable =
+      contentRef.current.querySelector<HTMLElement>(focusableSelectors);
+
+    if (firstFocusable) {
+      firstFocusable.focus();
+    } else {
+      contentRef.current.focus();
+    }
+  }, [open]);
+
+  // Escapeで閉じる
+  React.useEffect(() => {
+    if (!open) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        close();
+        triggerRef.current?.focus(); // フォーカスをトリガーに戻す
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, close, triggerRef]);
+
+  // 外側クリックで閉じる
+  React.useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        !contentRef.current?.contains(target) &&
+        !triggerRef.current?.contains(target)
+      ) {
+        close();
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [open, close, triggerRef]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      ref={setRefs}
+      id={popoverId}
+      role="dialog"
+      aria-label="Popover"
+      tabIndex={-1}
+      style={floatingStyles}
+      className={className}
+      {...props}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+// --- Close Button ---
+
+function Close({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { close, triggerRef } = usePopoverContext();
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        close();
+        triggerRef.current?.focus();
+      }}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export const Popover = { Root, Trigger, Content, Close };
+```
+
+## フォーカスリターンパターン
+
+Popoverを閉じるときにフォーカスをトリガーに戻すことは、基本的なアクセシビリティパターンです。実装ではトリガーへのrefを保持し、閉じるときに`.focus()`を呼び出します：
+
+```tsx
+// Escapeで閉じるとき：
+close();
+triggerRef.current?.focus();
+
+// 外側クリックで閉じるとき：
+close();
+triggerRef.current?.focus();
+
+// Closeボタンで閉じるとき：
+close();
+triggerRef.current?.focus();
+```
+
+すべての閉じるパスでフォーカスを戻す必要があります。1つでも欠けるとキーボード体験が壊れます。
+
+## 使用例
+
+```tsx
+function SettingsPopover() {
+  return (
+    <Popover.Root>
+      <Popover.Trigger>
+        Settings
+      </Popover.Trigger>
+      <Popover.Content className="popover" aria-label="Quick settings">
+        <h3>Quick Settings</h3>
+        <label>
+          <input type="checkbox" /> Dark mode
+        </label>
+        <label>
+          <input type="checkbox" /> Notifications
+        </label>
+        <Popover.Close>Done</Popover.Close>
+      </Popover.Content>
+    </Popover.Root>
+  );
+}
+```
+
+## CSSの戦略
+
+```css
+.popover {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  min-width: 200px;
+  z-index: 50;
+}
+
+.popover:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+```
+
+## PopoverとDialog：アップグレードのタイミング
+
+Popoverがより複雑になると、完全な**Dialog**が必要になる場合があります：
+
+| Popoverのまま | Dialogにアップグレード |
+|--------------|----------------------|
+| インタラクティブ要素が1-3個 | 多くのフィールドを持つ複雑なフォーム |
+| 素早いアクション（トグル、選択） | 複数ステップのワークフロー |
+| 背景幕が不要 | 背景とのインタラクションをブロックすべき |
+| 軽量なフォーカス管理 | 完全なフォーカストラップが必要 |
+
+Dialogコンポーネントは次のモジュールで構築します。
+
+## 重要なポイント
+
+1. **`aria-expanded`**はトリガーに設定し、開閉状態をスクリーンリーダーに通知します。
+2. **クリックトリガー** — Popoverはクリックで開き、ホバーではありません。
+3. **フォーカス管理** — 開くときにPopover内にフォーカスを移動し、閉じるときにトリガーに戻します。
+4. **外側クリック**は`mousedown`リスナーで確実にPopoverを閉じます。
+5. **Escapeキー**はPopoverを閉じてフォーカスをトリガーに戻す必要があります。
+6. **Portalレンダリング**はCSSオーバーフローとスタッキングコンテキストの問題を防ぎます。
+7. **すべての閉じるパス**でフォーカスをトリガーに戻す必要があります。
+
+## 自分で試してみよう
+
+<Exercise id="popover-basic" />

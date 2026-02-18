@@ -1,0 +1,290 @@
+---
+title: "Toast/通知システムの構築"
+description: "キュー管理、自動消去タイマー、ホバー時の一時停止、role='status'/role='alert'、スワイプで消去を備えたToast通知システムの構築方法を学びます。"
+order: 4
+isFree: false
+---
+
+# Toast/通知システムの構築
+
+**Toast**（「通知」や「スナックバー」とも呼ばれる）は、アクションの結果をユーザーに伝えるために一時的に表示される簡潔な非モーダルメッセージです。Toastは、単一の要素ではなく*システム*として動作するという点で、UIコンポーネントの中でもユニークです：複数のToastがキューに入り、それぞれが独自のライフサイクルを持ちます。
+
+## 設計上の課題
+
+Toastには、よりシンプルなコンポーネントには見られないいくつかの課題があります：
+
+1. **キュー管理**：複数のToastが同時に表示される可能性があります。表示数の上限、スタック方法、消去順序を決める必要があります。
+2. **自動消去タイミング**：各Toastには消えるまでの設定可能な持続時間があります。ユーザーがホバーやフォーカスしたときにタイマーを一時停止し、読む時間を確保すべきです。
+3. **命令的API**：宣言的にレンダリングされるほとんどのReactコンポーネントとは異なり、Toastは通常、命令的にトリガーされます：`toast("保存しました")`。
+4. **アニメーション**：Toastはトランジション付きでビューポートに入退場するため、アンマウントフェーズ周辺の慎重なステート管理が必要です。
+
+## ARIAライブリージョン
+
+Toastは、フォーカスを移動せずにスクリーンリーダーにコンテンツを通知するためにARIAライブリージョンを使用します：
+
+| ロール | 用途 | 動作 |
+|------|-------|----------|
+| `role="status"` | 情報メッセージ | ポライト — 現在の読み上げが終わるまで待つ |
+| `role="alert"` | エラーまたは緊急メッセージ | アサーティブ — 現在の読み上げを中断する |
+
+<Callout type="warning">
+`role="alert"` は控えめに使用してください。アサーティブな通知は、スクリーンリーダーが現在読み上げている内容を中断します。通常の成功メッセージには `role="status"`（ポライト）が適切です。`role="alert"` はエラーや重要なアクションのために取っておいてください。
+</Callout>
+
+Toastを保持するコンテナは、DOM内に永続的なライブリージョンであるべきです。Toastと一緒にライブリージョンを追加・削除すると、スクリーンリーダーが変更を検出できない可能性があります。
+
+```tsx
+// このコンテナは常にDOMに存在する
+<div aria-live="polite" aria-atomic="false">
+  {toasts.map((t) => (
+    <div key={t.id} role="status">{t.message}</div>
+  ))}
+</div>
+```
+
+## Toastストア
+
+Toastは命令的にトリガーされるため、Reactのレンダーサイクルの外にストアが必要です。このストアはキューを管理し、Toastの追加、消去、更新のためのメソッドを公開します：
+
+```tsx
+type ToastVariant = "info" | "success" | "error" | "warning";
+
+interface ToastData {
+  id: string;
+  message: string;
+  variant: ToastVariant;
+  duration: number;
+  createdAt: number;
+}
+
+type Listener = () => void;
+
+let toasts: ToastData[] = [];
+let listeners: Set<Listener> = new Set();
+
+function notify() {
+  listeners.forEach((fn) => fn());
+}
+
+function subscribe(listener: Listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getSnapshot(): ToastData[] {
+  return toasts;
+}
+
+let counter = 0;
+
+function addToast(message: string, variant: ToastVariant = "info", duration = 5000): string {
+  const id = `toast-${++counter}`;
+  toasts = [...toasts, { id, message, variant, duration, createdAt: Date.now() }];
+  notify();
+  return id;
+}
+
+function dismissToast(id: string) {
+  toasts = toasts.filter((t) => t.id !== id);
+  notify();
+}
+```
+
+<Callout type="tip">
+`useSyncExternalStore` を使用してReactをこの外部ストアにサブスクライブします。これはReact 18+のコンカレント機能と非Reactステートを統合する正しい方法です。
+</Callout>
+
+## `useSyncExternalStore` を介したReact統合
+
+```tsx
+import { useSyncExternalStore } from "react";
+
+function useToasts(): ToastData[] {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+```
+
+このhookはToastキューが変更されるたびに再レンダリングをトリガーし、コンカレントレンダリングに対して安全です。
+
+## ホバー時一時停止付き自動消去
+
+各Toastには、指定された持続時間後に自動消去するタイマーがあります。ユーザーがToastにホバーまたはフォーカスするとタイマーが一時停止します：
+
+```tsx
+function useAutoDismiss(id: string, duration: number) {
+  const [paused, setPaused] = React.useState(false);
+  const remainingRef = React.useRef(duration);
+  const startRef = React.useRef(Date.now());
+
+  React.useEffect(() => {
+    if (paused) {
+      remainingRef.current -= Date.now() - startRef.current;
+      return;
+    }
+
+    startRef.current = Date.now();
+    const timer = setTimeout(() => {
+      dismissToast(id);
+    }, remainingRef.current);
+
+    return () => clearTimeout(timer);
+  }, [id, paused]);
+
+  return {
+    onMouseEnter: () => setPaused(true),
+    onMouseLeave: () => setPaused(false),
+    onFocus: () => setPaused(true),
+    onBlur: () => setPaused(false),
+  };
+}
+```
+
+重要なポイントは*残り時間*を追跡することです。ユーザーがホバーすると、経過時間を計算して残りを保存します。ホバーが離れると、残りの持続時間で新しいタイマーを開始します。
+
+## スワイプで消去
+
+タッチデバイスでは、ユーザーはToastをスワイプして消すことを期待します。水平方向のポインター移動を追跡し、スワイプ距離がしきい値を超えたら消去します：
+
+```tsx
+function useSwipeToDismiss(id: string, threshold = 100) {
+  const startXRef = React.useRef(0);
+  const offsetRef = React.useRef(0);
+  const [offset, setOffset] = React.useState(0);
+
+  const handlers = {
+    onPointerDown: (e: React.PointerEvent) => {
+      startXRef.current = e.clientX;
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+      const delta = e.clientX - startXRef.current;
+      offsetRef.current = delta;
+      setOffset(delta);
+    },
+    onPointerUp: () => {
+      if (Math.abs(offsetRef.current) > threshold) {
+        dismissToast(id);
+      } else {
+        setOffset(0);
+      }
+      offsetRef.current = 0;
+    },
+  };
+
+  return { offset, handlers };
+}
+```
+
+## 完全なコンポーネント実装
+
+```tsx
+import * as React from "react";
+
+function ToastProvider({ children }: { children: React.ReactNode }) {
+  const toasts = useToasts();
+
+  return (
+    <>
+      {children}
+      <div
+        aria-live="polite"
+        style={{
+          position: "fixed",
+          bottom: 16,
+          right: 16,
+          display: "flex",
+          flexDirection: "column-reverse",
+          gap: 8,
+          zIndex: 9999,
+          pointerEvents: "none",
+        }}
+      >
+        {toasts.map((t) => (
+          <ToastItem key={t.id} toast={t} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function ToastItem({ toast }: { toast: ToastData }) {
+  const autoDismiss = useAutoDismiss(toast.id, toast.duration);
+  const { offset, handlers: swipeHandlers } = useSwipeToDismiss(toast.id);
+  const role = toast.variant === "error" ? "alert" : "status";
+
+  return (
+    <div
+      role={role}
+      data-variant={toast.variant}
+      style={{
+        pointerEvents: "auto",
+        transform: `translateX(${offset}px)`,
+        opacity: 1 - Math.abs(offset) / 200,
+        transition: offset === 0 ? "transform 200ms, opacity 200ms" : "none",
+      }}
+      {...autoDismiss}
+      {...swipeHandlers}
+    >
+      <p>{toast.message}</p>
+      <button
+        type="button"
+        aria-label="Dismiss notification"
+        onClick={() => dismissToast(toast.id)}
+      >
+        Close
+      </button>
+    </div>
+  );
+}
+
+// 公開命令的API
+export function toast(message: string, variant?: ToastVariant, duration?: number) {
+  return addToast(message, variant, duration);
+}
+
+export { ToastProvider, dismissToast };
+```
+
+## 命令的APIパターン
+
+`toast()` 関数は、どこからでも呼び出せるモジュールレベルのエクスポートです — イベントハンドラ、ユーティリティ関数、さらにはReactコンポーネントの外からも。この命令的パターンはToastでは一般的です。Toastはレンダリングステートではなくアクションによってトリガーされるためです：
+
+```tsx
+// イベントハンドラ内
+async function handleSave() {
+  try {
+    await saveDocument();
+    toast("Document saved", "success");
+  } catch {
+    toast("Failed to save document", "error");
+  }
+}
+```
+
+## Toastのスタッキングと制限
+
+本番環境では、表示するToastの数を制限し、残りをキューに入れるべきです：
+
+```tsx
+const MAX_VISIBLE = 3;
+
+function ToastProvider({ children }: { children: React.ReactNode }) {
+  const allToasts = useToasts();
+  const visibleToasts = allToasts.slice(-MAX_VISIBLE);
+  // ...
+}
+```
+
+## 重要なポイント
+
+1. **情報Toastには `role="status"`** を、エラーには `role="alert"` を使用 — アサーティブな通知を乱用しないでください。
+2. **ライブリージョンコンテナをDOMに永続的に保持**し、スクリーンリーダーがコンテンツの変更を検出できるようにします。
+3. **`useSyncExternalStore`** を使用して命令的なToastストアとReactのレンダリングを橋渡しします。
+4. **ホバー時一時停止では残り時間を追跡**します。経過時間ではなく、残り時間でタイマーが正しく再開されます。
+5. **`setPointerCapture` を使ったスワイプで消去**がタッチユーザーに自然な操作を提供します。
+6. **表示Toastを制限**し、残りをキューに入れて視覚的な散乱を防ぎます。
+
+## 実践してみよう
+
+<Exercise id="toast-basic" />

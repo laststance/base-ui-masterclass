@@ -1,0 +1,259 @@
+---
+title: "tsupでのバンドル"
+description: "ESMとCJSのデュアル出力、ツリーシェイキング、コンポーネントごとのエントリーポイント、package.jsonのexportsフィールド設定を含むtsupでのコンポーネントライブラリのバンドル方法を学びます。"
+order: 1
+isFree: false
+---
+
+# tsupでのバンドル
+
+ヘッドレスコンポーネントライブラリ全体を構築しました。いよいよ公開の時です。**バンドル**とは、TypeScriptソースをコンシューマーがインストールしてインポートできる配布可能なJavaScriptに変換するプロセスです。このレッスンでは、esbuildを基盤としたゼロコンフィグバンドラー[tsup](https://tsup.egoist.dev/)を設定し、本番環境に対応したパッケージを生成します。
+
+## なぜtsupか？
+
+コンポーネントライブラリのバンドルには、汎用バンドラー（Webpack、Vite）では最適化されていない特有の要件があります：
+
+| 要件 | 重要な理由 |
+|-------------|---------------|
+| ESM + CJSデュアル出力 | コンシューマーがどちらのモジュールシステムも使用する可能性がある |
+| TypeScript宣言 | コンシューマーの型安全性 |
+| ツリーシェイキングサポート | コンシューマーのビルドでのデッドコード除去 |
+| 高速イテレーション | 開発中にミリ秒でリビルド |
+| 最小限の設定 | ビルドツールではなくコンポーネントに集中 |
+
+tsupはこれらすべてをそのまま処理します。JavaScriptバンドルにはesbuild（非常に高速）を、宣言ファイル生成にはTypeScriptコンパイラを使用します。
+
+## 基本設定
+
+パッケージのルートに `tsup.config.ts` を作成します：
+
+```tsx
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: ["src/index.ts"],
+  format: ["esm", "cjs"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  splitting: true,
+  treeshake: true,
+});
+```
+
+| オプション | 目的 |
+|--------|---------|
+| `entry` | バンドルする入力ファイル |
+| `format: ["esm", "cjs"]` | 両モジュールシステム向けデュアル出力 |
+| `dts: true` | `.d.ts` 宣言ファイルを生成 |
+| `sourcemap: true` | デバッグ用のソースマップを有効化 |
+| `clean: true` | 各ビルド前に `dist/` を削除 |
+| `splitting: true` | 共有モジュールのコード分割（ESMのみ） |
+| `treeshake: true` | esbuildによるデッドコード除去 |
+
+`tsup` を実行すると以下が生成されます：
+
+```
+dist/
+  index.mjs          # ESM出力
+  index.js            # CJS出力
+  index.d.mts         # ESM宣言
+  index.d.ts          # CJS宣言
+  index.mjs.map       # ESMソースマップ
+  index.js.map        # CJSソースマップ
+```
+
+## コンポーネントごとのエントリーポイント
+
+単一の `index.ts` バレルファイルでは、コンシューマーが1つのコンポーネントしか使わない場合でもライブラリ全体をインポートすることを強制します。コンポーネントごとのエントリーポイントにより、インポートレベルでのツリーシェイキングが可能になります：
+
+```tsx
+// tsup.config.ts
+import { defineConfig } from "tsup";
+
+export default defineConfig({
+  entry: {
+    index: "src/index.ts",
+    button: "src/button/index.ts",
+    switch: "src/switch/index.ts",
+    tabs: "src/tabs/index.ts",
+    accordion: "src/accordion/index.ts",
+    slider: "src/slider/index.ts",
+    "number-field": "src/number-field/index.ts",
+    toast: "src/toast/index.ts",
+    "scroll-area": "src/scroll-area/index.ts",
+    progress: "src/progress/index.ts",
+  },
+  format: ["esm", "cjs"],
+  dts: true,
+  sourcemap: true,
+  clean: true,
+  splitting: true,
+  treeshake: true,
+  external: ["react", "react-dom"],
+});
+```
+
+<Callout type="info">
+`react` と `react-dom` は必ず `external` としてマークしてください。これらはpeer dependenciesです — コンシューマーのアプリケーションが提供します。ライブラリにReactをバンドルすると、Reactインスタンスが重複してhooksが壊れます。
+</Callout>
+
+これでコンシューマーは個別のコンポーネントをインポートできます：
+
+```tsx
+// ボタンのコードのみ読み込み、ライブラリ全体ではない
+import { Button } from "@mylib/ui/button";
+```
+
+## `package.json` のexportsフィールド
+
+`package.json` の `exports` フィールド（「エクスポートマップ」とも呼ばれる）は、Node.jsとバンドラーにパッケージのエントリーポイントの解決方法を伝えます。これは `main` と `module` フィールドに代わるモダンな方法です：
+
+```json
+{
+  "name": "@mylib/ui",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./button": {
+      "import": {
+        "types": "./dist/button.d.mts",
+        "default": "./dist/button.mjs"
+      },
+      "require": {
+        "types": "./dist/button.d.ts",
+        "default": "./dist/button.js"
+      }
+    },
+    "./slider": {
+      "import": {
+        "types": "./dist/slider.d.mts",
+        "default": "./dist/slider.mjs"
+      },
+      "require": {
+        "types": "./dist/slider.d.ts",
+        "default": "./dist/slider.js"
+      }
+    }
+  },
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}
+```
+
+### 条件の順序が重要
+
+各エクスポートエントリー内で、条件は上から下に評価されます。`types` 条件はTypeScriptがJavaScriptの前に宣言を解決するよう、最初に来る必要があります：
+
+```json
+{
+  "import": {
+    "types": "./dist/index.d.mts",   // TypeScriptがまずこれをチェック
+    "default": "./dist/index.mjs"     // ランタイムがこれを使用
+  }
+}
+```
+
+<Callout type="warning">
+`types` が `default` の後にリストされると、一部のTypeScriptバージョンで型宣言が見つからない場合があります。各条件ブロック内では必ず `types` を最初に配置してください。
+</Callout>
+
+## `sideEffects: false`
+
+`sideEffects: false` フィールドは、バンドラー（Webpack、Rollup、esbuild）にパッケージ内のすべてのモジュールが副作用フリーであることを伝えます。これにより積極的なツリーシェイキングが可能になります：コンシューマーが `Button` のみをインポートした場合、バンドラーは最終バンドルから他のすべてのコンポーネントを安全に削除できます。
+
+モジュールに副作用があるとは、インポートするだけでグローバル状態が変更される場合です（例：Webコンポーネントの登録、`window` の変更、ポリフィルの実行）。ヘッドレスReactコンポーネントは関数とコンポーネントをエクスポートするだけなので、本質的に副作用フリーです — インポートしただけでは何も起こりません。
+
+```json
+{
+  "sideEffects": false
+}
+```
+
+副作用のある特定のファイルがある場合（例：CSSインポート）、それらをリストできます：
+
+```json
+{
+  "sideEffects": ["./dist/**/*.css"]
+}
+```
+
+## ビルドスクリプト
+
+`package.json` にこれらのスクリプトを追加します：
+
+```json
+{
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  }
+}
+```
+
+`prepublishOnly` スクリプトにより、`npm publish` のたびにフレッシュビルドが確保され、古いアーティファクトが出荷されるのを防ぎます。
+
+## バンドルの検証
+
+ビルド後、出力を検証します：
+
+```bash
+# ファイルサイズを確認
+du -sh dist/*
+
+# ESMインポートの動作を検証
+node --input-type=module -e "import { Button } from './dist/button.mjs'; console.log(Button);"
+
+# CJS requireの動作を検証
+node -e "const { Button } = require('./dist/button.js'); console.log(Button);"
+
+# exportsの解決を確認
+node --input-type=module -e "import { Button } from '@mylib/ui/button'; console.log(Button);"
+```
+
+<Callout type="tip">
+[publint](https://publint.dev/) を使用して `package.json` のexportsフィールドを検証してください。宣言ファイルの欠落、間違った条件順序、到達不能なエントリーポイントなどの一般的な設定ミスを公開前にキャッチできます。
+</Callout>
+
+## 応用：バナーとフッター
+
+React Server Componentsとの互換性のために `"use client"` ディレクティブを追加する必要がある場合、tsupは `banner` オプションをサポートしています：
+
+```tsx
+export default defineConfig({
+  // ...
+  banner: {
+    js: '"use client";',
+  },
+});
+```
+
+これにより、すべての出力ファイルに `"use client"` が先頭に追加され、Next.js App Routerやその他のRSC環境でコンポーネントが動作するようになります。
+
+## 重要なポイント
+
+1. **tsupを使用**して、Reactコンポーネントライブラリの高速かつゼロコンフィグなバンドルを実現します。
+2. **ESMとCJSの両方を出力**して、すべてのコンシューマー環境をサポートします。
+3. **コンポーネントごとのエントリーポイント**により、インポートレベルのツリーシェイキングが可能になります。
+4. **`package.json` の `exports` フィールド**は、エントリーポイント解決を定義するモダンな方法です。`types` は必ず `default` の前に配置してください。
+5. **`sideEffects: false`** により、ヘッドレスコンポーネントにはインポート時の副作用がないため、積極的なツリーシェイキングが可能になります。
+6. **`react` と `react-dom` をexternalとしてマーク**して、Reactインスタンスの重複バンドルを避けます。
+7. **公開前に `publint` を実行**して、exportsの設定ミスをキャッチします。

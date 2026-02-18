@@ -58,6 +58,7 @@ export default function LoginPage() {
             disabled={pending}
             className="flex w-full h-12 items-center justify-center gap-3 rounded-lg border border-border bg-surface px-4 text-sm font-semibold text-text-primary transition-colors hover:bg-surface-elevated hover:border-text-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50 disabled:pointer-events-none"
           >
+            {/* Google brand colors — exempt from design system (brand guidelines) */}
             <svg className="h-5 w-5" viewBox="0 0 24 24">
               <path
                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"

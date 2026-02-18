@@ -1,0 +1,337 @@
+---
+title: "ScrollAreaコンポーネントの構築"
+description: "カスタムスタイルのスクロールバー、ビューポートのオーバーフロー管理、コンテンツ比率からのサムサイズ計算、ドラッグスクロール操作を備えたカスタムScrollAreaの構築方法を学びます。"
+order: 3
+isFree: false
+---
+
+# ScrollAreaコンポーネントの構築
+
+**ScrollArea**は、基盤となるスクロール動作を維持しながら、ブラウザのネイティブスクロールバーをカスタムスタイルのものに置き換えます。ネイティブスクロールバーはOSによって見た目が異なり、一貫したスタイリングができません。ヘッドレスなScrollAreaを使えば、スムーズなスクロール、アクセシビリティ、キーボードナビゲーションを維持しながら完全な視覚制御が可能になります。
+
+## なぜカスタムスクロールバーか？
+
+ネイティブスクロールバーのスタイリングには深刻な制限があります：
+
+| ブラウザ | スクロールバースタイリングサポート |
+|---------|--------------------------|
+| Chrome/Safari | `::-webkit-scrollbar` 擬似要素（非標準） |
+| Firefox | `scrollbar-width` と `scrollbar-color`（限定的） |
+| iOS Safari | スクロールバーは自動非表示で、スタイリング不可 |
+
+結果として、スタイリングの整合性が取れない状況になります。ヘッドレスなScrollAreaは、ネイティブスクロールバーを非表示にし、CSSで完全に制御できるカスタムスクロールバーをレンダリングすることで、この問題を回避します。
+
+## アーキテクチャの概要
+
+ScrollAreaは4つのパーツで構成されています：
+
+- **`ScrollArea.Root`** — サイズとコンテキストを設定する外側のコンテナ。
+- **`ScrollArea.Viewport`** — `overflow: scroll` を持つスクロール可能なコンテンツコンテナ。ネイティブスクロールバーは非表示。
+- **`ScrollArea.Scrollbar`** — ビューポートの横に配置されるカスタムスクロールバートラック。
+- **`ScrollArea.Thumb`** — スクロールバー内のドラッグ可能なハンドル。コンテンツ比率に比例したサイズ。
+
+<Callout type="info">
+重要なポイントは、スクロール自体を再実装していないということです。ビューポートはネイティブの `overflow: scroll` を使用します。スクロール位置を監視し、カスタムスクロールバーUIに反映しているだけです。
+</Callout>
+
+## ネイティブスクロールバーを非表示にする
+
+ビューポートに `overflow: scroll` を設定しつつ、スクロールバーを画面外に押し出すネガティブマージンとパディングで非表示にします：
+
+```css
+.scroll-area-viewport {
+  overflow: scroll;
+  scrollbar-width: none; /* Firefox */
+}
+
+.scroll-area-viewport::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+```
+
+別の方法として、`overflow: hidden` のラッパーdivを使い、ビューポートをラッパーよりわずかに広くしてスクロールバーをオーバーフロー境界の後ろに隠す実装もあります。上記のCSSアプローチはよりシンプルで、モダンブラウザで十分に機能します。
+
+## コンテンツ比率からのサムサイズ計算
+
+サムのサイズは、表示されるビューポートとスクロール可能なコンテンツ全体の比率を反映すべきです：
+
+```tsx
+function calculateThumbSize(
+  viewportSize: number,
+  contentSize: number,
+  trackSize: number,
+): number {
+  const ratio = viewportSize / contentSize;
+  const thumbSize = Math.max(ratio * trackSize, 20); // ユーザビリティのため最小20px
+  return thumbSize;
+}
+```
+
+ビューポートが400pxでコンテンツが1600pxの場合、比率は0.25なので、サムはスクロールバートラックの25%を占めます。非常に長いコンテンツでもサムがクリック可能であるよう、最小サイズ（20px）を強制します。
+
+## スクロール位置からサム位置へ
+
+トラック内のサム位置は、コンテンツ内のスクロール位置を反映します：
+
+```tsx
+function calculateThumbPosition(
+  scrollTop: number,
+  contentSize: number,
+  viewportSize: number,
+  trackSize: number,
+  thumbSize: number,
+): number {
+  const scrollableDistance = contentSize - viewportSize;
+  if (scrollableDistance <= 0) return 0;
+  const scrollRatio = scrollTop / scrollableDistance;
+  return scrollRatio * (trackSize - thumbSize);
+}
+```
+
+## ドラッグスクロール
+
+ユーザーがサムをドラッグするとき、計算を逆にしてサム位置をスクロール位置に変換します：
+
+```tsx
+function handleThumbDrag(
+  pointerY: number,
+  trackRect: DOMRect,
+  thumbSize: number,
+  contentSize: number,
+  viewportSize: number,
+) {
+  const trackSize = trackRect.height;
+  const thumbPosition = pointerY - trackRect.top - thumbSize / 2;
+  const scrollableTrack = trackSize - thumbSize;
+  const scrollRatio = Math.max(0, Math.min(thumbPosition / scrollableTrack, 1));
+  const scrollTop = scrollRatio * (contentSize - viewportSize);
+  return scrollTop;
+}
+```
+
+<Callout type="warning">
+サムをドラッグする際は、必ず `setPointerCapture` を使用してください（Sliderと同様）。これがないと、素早いドラッグでカーソルがスクロールバー領域から離れたときにドラッグが壊れます。
+</Callout>
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+interface ScrollAreaContextValue {
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+  thumbRef: React.RefObject<HTMLDivElement | null>;
+  scrollbarRef: React.RefObject<HTMLDivElement | null>;
+  thumbSize: number;
+  thumbPosition: number;
+  isScrollable: boolean;
+}
+
+const ScrollAreaContext = React.createContext<ScrollAreaContextValue | null>(null);
+
+function useScrollAreaContext() {
+  const ctx = React.useContext(ScrollAreaContext);
+  if (!ctx) throw new Error("ScrollArea sub-components must be used within ScrollArea.Root");
+  return ctx;
+}
+
+function Root({ children, ...props }: React.ComponentPropsWithoutRef<"div">) {
+  const viewportRef = React.useRef<HTMLDivElement>(null);
+  const thumbRef = React.useRef<HTMLDivElement>(null);
+  const scrollbarRef = React.useRef<HTMLDivElement>(null);
+
+  const [thumbSize, setThumbSize] = React.useState(0);
+  const [thumbPosition, setThumbPosition] = React.useState(0);
+  const [isScrollable, setIsScrollable] = React.useState(false);
+
+  const updateScrollbar = React.useCallback(() => {
+    const viewport = viewportRef.current;
+    const scrollbar = scrollbarRef.current;
+    if (!viewport || !scrollbar) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = viewport;
+    const trackHeight = scrollbar.clientHeight;
+
+    const hasOverflow = scrollHeight > clientHeight;
+    setIsScrollable(hasOverflow);
+
+    if (!hasOverflow) return;
+
+    const ratio = clientHeight / scrollHeight;
+    const newThumbSize = Math.max(ratio * trackHeight, 20);
+    setThumbSize(newThumbSize);
+
+    const scrollableDistance = scrollHeight - clientHeight;
+    const scrollRatio = scrollableDistance > 0 ? scrollTop / scrollableDistance : 0;
+    setThumbPosition(scrollRatio * (trackHeight - newThumbSize));
+  }, []);
+
+  React.useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    updateScrollbar();
+    viewport.addEventListener("scroll", updateScrollbar, { passive: true });
+
+    const observer = new ResizeObserver(updateScrollbar);
+    observer.observe(viewport);
+
+    return () => {
+      viewport.removeEventListener("scroll", updateScrollbar);
+      observer.disconnect();
+    };
+  }, [updateScrollbar]);
+
+  const ctx = React.useMemo(
+    () => ({ viewportRef, thumbRef, scrollbarRef, thumbSize, thumbPosition, isScrollable }),
+    [thumbSize, thumbPosition, isScrollable],
+  );
+
+  return (
+    <ScrollAreaContext value={ctx}>
+      <div style={{ position: "relative", overflow: "hidden" }} {...props}>
+        {children}
+      </div>
+    </ScrollAreaContext>
+  );
+}
+
+function Viewport({ children, ...props }: React.ComponentPropsWithoutRef<"div">) {
+  const { viewportRef } = useScrollAreaContext();
+
+  return (
+    <div
+      ref={viewportRef}
+      style={{
+        overflow: "scroll",
+        scrollbarWidth: "none",
+        msOverflowStyle: "none",
+        width: "100%",
+        height: "100%",
+      }}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Scrollbar({ children, ...props }: React.ComponentPropsWithoutRef<"div">) {
+  const { scrollbarRef, viewportRef, thumbSize, isScrollable } = useScrollAreaContext();
+
+  const handleTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    const scrollbar = scrollbarRef.current;
+    if (!viewport || !scrollbar) return;
+    if (e.target !== e.currentTarget) return;
+
+    const trackRect = scrollbar.getBoundingClientRect();
+    const clickPosition = e.clientY - trackRect.top;
+    const trackHeight = trackRect.height;
+    const scrollRatio = clickPosition / trackHeight;
+    viewport.scrollTop = scrollRatio * (viewport.scrollHeight - viewport.clientHeight);
+  };
+
+  if (!isScrollable) return null;
+
+  return (
+    <div
+      ref={scrollbarRef}
+      role="scrollbar"
+      aria-controls={undefined}
+      aria-orientation="vertical"
+      aria-valuenow={undefined}
+      onClick={handleTrackClick}
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        width: 8,
+        height: "100%",
+      }}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Thumb(props: React.ComponentPropsWithoutRef<"div">) {
+  const { thumbRef, viewportRef, scrollbarRef, thumbSize, thumbPosition } = useScrollAreaContext();
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+
+    const viewport = viewportRef.current;
+    const scrollbar = scrollbarRef.current;
+    if (!viewport || !scrollbar) return;
+
+    const trackRect = scrollbar.getBoundingClientRect();
+    const trackHeight = trackRect.height;
+    const thumbPos = e.clientY - trackRect.top - thumbSize / 2;
+    const scrollableTrack = trackHeight - thumbSize;
+    const scrollRatio = Math.max(0, Math.min(thumbPos / scrollableTrack, 1));
+    viewport.scrollTop = scrollRatio * (viewport.scrollHeight - viewport.clientHeight);
+  };
+
+  return (
+    <div
+      ref={thumbRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      style={{
+        position: "absolute",
+        top: thumbPosition,
+        width: "100%",
+        height: thumbSize,
+        borderRadius: 4,
+        cursor: "grab",
+      }}
+      {...props}
+    />
+  );
+}
+
+export const ScrollArea = { Root, Viewport, Scrollbar, Thumb };
+```
+
+## 動的コンテンツへのResizeObserver
+
+コンテンツは動的にサイズが変わる可能性があります（アコーディオンパネルの展開、遅延読み込み画像など）。ビューポートに `ResizeObserver` を使用して、スクロール可能なコンテンツのサイズが変わるたびにサムのサイズと位置を再計算します：
+
+```tsx
+const observer = new ResizeObserver(updateScrollbar);
+observer.observe(viewport);
+```
+
+これにより、初期レンダリング後にコンテンツが拡大・縮小しても、スクロールバーが同期を保ちます。
+
+## アクセシビリティの考慮事項
+
+カスタムスクロールバーにはアクセシビリティの懸念があります：
+
+- **キーボードスクロールは引き続き機能します**：ビューポートがネイティブの `overflow: scroll` を使用しているため、キーボードユーザーは矢印キー、Page Up/Down、Spaceでスクロールできます。
+- **カスタムスクロールバーは装飾的です**：ネイティブスクロールバーの動作を反映しています。スクリーンリーダーはカスタムスクロールバーではなく、スクロール可能なコンテンツと直接やり取りします。
+- **フォーカス管理**：ビューポートのコンテンツは自然にフォーカスを受け取ります。カスタムサムはオプションのポインターターゲットであり、キーボードでフォーカス可能な要素ではありません。
+
+<Callout type="tip">
+macOSの動作に似て、一定期間操作がないとスクロールバーを自動的に非表示にすることを検討してください。デバウンスされたスクロールイベントハンドラでトグルする `data-scrolling` 属性によってトリガーされるCSS `opacity` トランジションを使用します。
+</Callout>
+
+## 重要なポイント
+
+1. **スクロールを再実装しないでください**：ビューポートにネイティブの `overflow: scroll` を使用し、その状態を監視します。
+2. **ネイティブスクロールバーを非表示にする**には `scrollbar-width: none` と `::-webkit-scrollbar { display: none }` を使用します。
+3. **サムをビューポート/コンテンツ比率に比例してサイズ設定**し、適切な最小値（20px）を設けます。
+4. **スクロール位置をサム位置に変換**し、ドラッグスクロールではその逆を行います。
+5. **`setPointerCapture`** を使用してスムーズなサムドラッグを実現します。
+6. **ResizeObserver** を使用してスクロールバーを動的コンテンツと同期させます。
+
+## 実践してみよう
+
+<Exercise id="scroll-area-basic" />

@@ -28,6 +28,8 @@ export function CheckoutButton({
   return (
     <a
       href="https://base-ui-masterclass.lemonsqueezy.com/checkout/buy/xxxxxxxx"
+      target="_blank"
+      rel="noopener noreferrer"
       className={cn(
         "lemonsqueezy-button inline-flex h-14 items-center justify-center rounded-lg bg-accent px-10 text-base font-semibold text-background transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         className,

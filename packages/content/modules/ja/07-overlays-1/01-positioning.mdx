@@ -1,0 +1,328 @@
+---
+title: "Floating UIポジショニングの基礎"
+description: "アンカー要素を使ったオーバーレイの配置、配置戦略、flip/shiftミドルウェア、仮想要素について学びます。"
+order: 1
+isFree: false
+---
+
+# Floating UIポジショニングの基礎
+
+すべてのTooltip、Popover、ドロップダウンメニュー、コンテキストメニューには共通の課題があります。それは**フローティング要素をアンカーに対して相対的に配置する**ことです。オーバーレイコンポーネントを構築する前に、信頼性の高いポジショニングを可能にする計算とブラウザAPIを理解する必要があります。
+
+## ポジショニングの問題
+
+要素を別の要素の隣に配置するのは簡単に聞こえますが、以下を考慮するとそうではありません：
+
+1. **ビューポートの境界** — Tooltipが画面外にはみ出す可能性がある。
+2. **スクロールコンテナ** — アンカーがスクロール可能なdiv内にある場合がある。
+3. **動的コンテンツ** — フローティング要素のサイズがマウント後に変わる可能性がある。
+4. **レスポンシブレイアウト** — ウィンドウリサイズ時にアンカーが移動する場合がある。
+
+`position: absolute`で`top`/`left`の値を単純に計算して設定する方法は、これらの条件すべてで破綻します。これが**Floating UI**（Popper.jsの後継）のようなライブラリが存在する理由です。
+
+## コアコンセプト
+
+### アンカーとフローティング要素
+
+すべてのポジショニング計算には2つの要素が関わります：
+
+| 要素 | 役割 | 例 |
+|------|------|-----|
+| **アンカー**（リファレンス） | オーバーレイが付く要素 | ボタン、リンク、テキスト選択 |
+| **フローティング** | オーバーレイ自体 | Tooltip、Popover、ドロップダウン |
+
+フローティング要素は、両要素のバウンディング矩形から計算された座標を使ってアンカーに対して相対的に配置されます。
+
+### 配置（Placement）
+
+Placementは、フローティング要素がアンカーに対して**どこに**表示されるかを定義します。Floating UIは12種類のplacementをサポートしています：
+
+```
+      top-start     top     top-end
+         ┌───────────────────────┐
+         │                       │
+left-start│       ANCHOR         │right-start
+left      │                      │right
+left-end  │                      │right-end
+         │                       │
+         └───────────────────────┘
+   bottom-start   bottom   bottom-end
+```
+
+デフォルトのplacementは`"bottom"`で、フローティング要素はアンカーの下に水平方向中央揃えで表示されます。
+
+```tsx
+import { computePosition } from "@floating-ui/dom";
+
+const anchor = document.getElementById("my-button")!;
+const floating = document.getElementById("my-tooltip")!;
+
+const { x, y } = await computePosition(anchor, floating, {
+  placement: "top", // アンカーの上に表示
+});
+
+Object.assign(floating.style, {
+  left: `${x}px`,
+  top: `${y}px`,
+});
+```
+
+### 座標系
+
+`computePosition`はフローティング要素の**オフセット親要素**からのピクセルオフセットを表す`x`と`y`の値を返します。これらの座標が正しく機能するには、フローティング要素に`position: absolute`または`position: fixed`が必要です。
+
+<Callout type="tip">
+Portal内にレンダリングする場合（ほとんどのオーバーレイではそうすべきです）、フローティング要素のオフセット親要素は通常`document.body`になります。これにより、中間の位置指定された祖先要素を考慮する必要がないため、座標計算がシンプルになります。
+</Callout>
+
+## ミドルウェア
+
+生のplacement座標は出発点に過ぎません。**ミドルウェア**関数がエッジケースに対応するために位置を変換します。ミドルウェアは順番に実行され、それぞれが現在の座標を受け取り、変更された座標を返します。
+
+### `offset` — 間隔を追加
+
+`offset`ミドルウェアはアンカーとフローティング要素の間に距離を追加します。これがないと、フローティング要素はアンカーにぴったり接した状態になります。
+
+```tsx
+import { computePosition, offset } from "@floating-ui/dom";
+
+const { x, y } = await computePosition(anchor, floating, {
+  placement: "top",
+  middleware: [offset(8)], // アンカーとTooltipの間に8pxの間隔
+});
+```
+
+非対称なオフセットにはオブジェクトも渡せます：
+
+```tsx
+offset({
+  mainAxis: 8,   // placement軸方向の距離
+  crossAxis: 0,  // placementに垂直な方向の距離
+  alignmentAxis: -4, // アラインメント（start/end）方向のシフト
+})
+```
+
+### `flip` — ビューポートのはみ出しを回避
+
+指定されたplacementでフローティング要素がビューポートからはみ出す場合、`flip`は反対側に切り替えます。
+
+```tsx
+import { flip } from "@floating-ui/dom";
+
+// "top"ではみ出す場合、自動的に"bottom"を使用
+middleware: [offset(8), flip()]
+```
+
+`flip`ミドルウェアはフリップ前に反対側の利用可能なスペースをチェックします。より細かい制御には`fallbackPlacements`配列を設定できます：
+
+```tsx
+flip({
+  fallbackPlacements: ["top", "right", "left"], // この順番で試行
+})
+```
+
+### `shift` — 軸に沿ってスライド
+
+`flip`が側面を変更する（topからbottomへ）のに対し、`shift`はクロス軸に沿ってフローティング要素をスライドさせ、ビュー内に収めます。
+
+```tsx
+import { shift } from "@floating-ui/dom";
+
+// ビューポート内に収まるよう水平方向にスライド
+middleware: [offset(8), flip(), shift({ padding: 8 })]
+```
+
+`padding`オプションはビューポート端からのバッファゾーンを作ります。
+
+<Callout type="info">
+ミドルウェアの順序は重要です。推奨される順序は、まず`offset`（flip/shiftがオフセット適用後に動作するように）、次に`flip`（最適な側面を選択）、最後に`shift`（その側面内で微調整）です。
+</Callout>
+
+### `arrow` — 矢印要素の配置
+
+多くのTooltipやPopoverにはアンカーを指す小さな矢印やキャレットが含まれます。`arrow`ミドルウェアはこの要素の配置位置を計算します。
+
+```tsx
+import { arrow } from "@floating-ui/dom";
+
+const arrowEl = document.getElementById("arrow")!;
+
+const { x, y, middlewareData } = await computePosition(anchor, floating, {
+  placement: "top",
+  middleware: [offset(8), flip(), shift(), arrow({ element: arrowEl })],
+});
+
+// 矢印を配置
+const { x: arrowX, y: arrowY } = middlewareData.arrow ?? {};
+Object.assign(arrowEl.style, {
+  left: arrowX != null ? `${arrowX}px` : "",
+  top: arrowY != null ? `${arrowY}px` : "",
+});
+```
+
+### `size` — サイズの制約
+
+`size`ミドルウェアは利用可能なスペースに基づいてフローティング要素のサイズを変更できます。ビューポートを超えてはならないドロップダウンメニューに不可欠です。
+
+```tsx
+import { size } from "@floating-ui/dom";
+
+middleware: [
+  size({
+    apply({ availableHeight }) {
+      Object.assign(floating.style, {
+        maxHeight: `${availableHeight}px`,
+      });
+    },
+  }),
+]
+```
+
+## ReactでのFloating UIの使用
+
+Floating UIはref、自動更新、クリーンアップを処理するhooksを備えたReactパッケージを提供しています：
+
+```tsx
+import {
+  useFloating,
+  offset,
+  flip,
+  shift,
+  autoUpdate,
+} from "@floating-ui/react";
+
+function TooltipExample() {
+  const { refs, floatingStyles } = useFloating({
+    placement: "top",
+    middleware: [offset(8), flip(), shift()],
+    whileElementsMounted: autoUpdate, // スクロール/リサイズ時に再配置
+  });
+
+  return (
+    <>
+      <button ref={refs.setReference}>Hover me</button>
+      <div ref={refs.setFloating} style={floatingStyles}>
+        Tooltip content
+      </div>
+    </>
+  );
+}
+```
+
+`autoUpdate`関数はスクロールイベント、リサイズイベント、DOM変更を監視し、フローティング要素を正しい位置に保ちます。
+
+<Callout type="warning">
+インタラクティブなオーバーレイには必ず`whileElementsMounted: autoUpdate`を指定してください。これがないと、ユーザーがスクロールやリサイズをしても、フローティング要素は初期位置のまま動きません。
+</Callout>
+
+## 仮想要素
+
+アンカーがDOM要素ではない場合もあります。例えば、コンテキストメニューはマウスカーソルの位置に表示されます。Floating UIは**仮想要素**をサポートしています — `getBoundingClientRect`メソッドを持つオブジェクトです：
+
+```tsx
+import { useFloating } from "@floating-ui/react";
+
+function ContextMenu() {
+  const { refs, floatingStyles } = useFloating({
+    placement: "right-start",
+    middleware: [offset(4), flip(), shift()],
+  });
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // カーソル位置に仮想要素を作成
+    refs.setReference({
+      getBoundingClientRect() {
+        return {
+          x: e.clientX,
+          y: e.clientY,
+          width: 0,
+          height: 0,
+          top: e.clientY,
+          right: e.clientX,
+          bottom: e.clientY,
+          left: e.clientX,
+        };
+      },
+    });
+  };
+
+  return (
+    <div onContextMenu={handleContextMenu}>
+      Right-click anywhere
+      <div ref={refs.setFloating} style={floatingStyles}>
+        Context menu items...
+      </div>
+    </div>
+  );
+}
+```
+
+仮想要素は以下の場面でも有用です：
+- **テキスト選択Popover** — `window.getSelection().getRangeAt(0).getBoundingClientRect()`で選択範囲のバウンディング矩形にアンカー
+- **ドラッグ&ドロップのフィードバック** — 現在のドラッグ位置にアンカー
+- **CanvasベースのUI** — `<canvas>`要素内の座標にアンカー
+
+## Portalレンダリング
+
+オーバーレイコンポーネントは**Portal** — 通常のコンポーネントツリー外のDOMノードにレンダリングすべきです。これにより以下を防止します：
+
+1. **CSSオーバーフローのクリッピング** — `overflow: hidden`を持つ親要素がオーバーレイをクリップしてしまう。
+2. **スタッキングコンテキストの問題** — `z-index`を持つ親要素がオーバーレイを他の要素の下に閉じ込めてしまう。
+3. **transform干渉** — 祖先要素のCSS `transform`が新しい包含ブロックを作成し、`position: fixed`が壊れる。
+
+Reactの`createPortal`はReact contextを保持したまま、子要素を別のDOMノードにレンダリングします：
+
+```tsx
+import { createPortal } from "react-dom";
+
+function Overlay({ children }: { children: React.ReactNode }) {
+  return createPortal(children, document.body);
+}
+```
+
+<Callout type="tip">
+Portalでレンダリングされた要素は異なるDOM位置にありますが、ReactイベントはDOMツリーではなくReactツリーを通じてバブルアップします。つまり、親のReactコンポーネントのクリックハンドラーは正常に動作し続けます。
+</Callout>
+
+## すべてを組み合わせる：ポジショニングパターン
+
+このコースのすべてのオーバーレイコンポーネントは同じポジショニングパターンに従います：
+
+1. **`useFloating`** — ミドルウェアで座標を計算。
+2. **Portal** — フローティング要素をDOMヒエラルキーの外にレンダリング。
+3. **`autoUpdate`** — スクロール/リサイズに合わせて位置を同期。
+4. **条件付きレンダリング** — オーバーレイが開いているときだけフローティング要素をマウント。
+
+```tsx
+function PositionedOverlay({ open, anchor, children }) {
+  const { refs, floatingStyles } = useFloating({
+    placement: "bottom",
+    middleware: [offset(8), flip(), shift({ padding: 8 })],
+    whileElementsMounted: autoUpdate,
+  });
+
+  // 外部のアンカーrefを同期
+  React.useEffect(() => {
+    refs.setReference(anchor);
+  }, [anchor, refs]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div ref={refs.setFloating} style={floatingStyles}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+```
+
+## 重要なポイント
+
+1. **`computePosition`**はフローティング要素をアンカーに対して配置するための`x`/`y`座標を計算します。
+2. **ミドルウェア**は座標を順番に変換します：`offset`が間隔を追加、`flip`が側面を切り替えてはみ出しを回避、`shift`がクロス軸に沿ってスライドします。
+3. **`autoUpdate`**はスクロール、リサイズ、レイアウト変更時に位置を正確に保ちます。
+4. **仮想要素**はマウスカーソルやテキスト選択などの任意の位置にアンカーできます。
+5. **Portal**はCSSクリッピングやスタッキングコンテキストの問題を防ぎ、コンポーネントヒエラルキーの外にレンダリングします。
+6. **ミドルウェアの順序は重要**：常に`offset`、次に`flip`、最後に`shift`の順に適用します。

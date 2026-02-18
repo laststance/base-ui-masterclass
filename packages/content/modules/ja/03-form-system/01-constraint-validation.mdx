@@ -1,0 +1,224 @@
+---
+title: "HTML Constraint Validation API"
+description: "カスタムフォームコンポーネントを構築する前に、ブラウザ組み込みのConstraint Validation API -- バリデーションステート、カスタムバリデーションメッセージ、setCustomValidity -- をマスターします。"
+order: 1
+isFree: false
+---
+
+# HTML Constraint Validation API
+
+カスタムのFormやFieldコンポーネントを構築する前に、ブラウザが無料で提供してくれるものを理解する必要があります。**Constraint Validation API**は、JavaScriptライブラリなしでフォーム入力をバリデーションするブラウザ組み込み機能です。Base UIはこの上に直接構築されています。
+
+## なぜZodやYupだけでは不十分なのか？
+
+スキーマバリデーションライブラリは強力ですが、ブラウザのネイティブバリデーションシステムの**外側**で実行されます。Constraint Validation APIは以下を提供します：
+
+1. `required`、`minlength`、`maxlength`、`pattern`、`min`、`max`、`type="email"`などの**無料のバリデーション**
+2. フォールバックとしての**ネイティブエラーUI**（ブラウザツールチップ）
+3. JavaScriptなしで動作する**`:invalid`と`:valid` CSS擬似クラス**
+4. **フォーム送信のブロック** -- 無効なフォームはネイティブに送信できない
+5. **アクセシビリティ** -- スクリーンリーダーがバリデーションエラーを自動的に読み上げる
+
+Base UIはこのAPIを置き換えるのではなく、ラップしてdata属性で公開し、不足部分（カスタムエラーメッセージやフィールドレベルのコンポジションなど）を追加します。
+
+## ValidityStateオブジェクト
+
+すべてのフォーム要素は`ValidityState`オブジェクトを返す`validity`プロパティを持ちます：
+
+```tsx
+const input = document.querySelector("input");
+console.log(input.validity);
+```
+
+| プロパティ | トリガー条件 | 例 |
+|-----------|-------------|-----|
+| `valueMissing` | `required` | 必須フィールドが空 |
+| `typeMismatch` | `type="email"`、`type="url"` | 無効なメール形式 |
+| `patternMismatch` | `pattern="..."` | 正規表現に一致しない |
+| `tooShort` | `minlength` | 最小文字数未満 |
+| `tooLong` | `maxlength` | 最大文字数超過 |
+| `rangeUnderflow` | `min` | 最小値未満の数値 |
+| `rangeOverflow` | `max` | 最大値超過の数値 |
+| `stepMismatch` | `step` | ステップに合わない数値 |
+| `badInput` | ブラウザ固有 | 数値フィールドへの非数値入力 |
+| `customError` | `setCustomValidity()` | カスタムバリデーションロジック |
+| `valid` | 上記のいずれでもない | すべての制約をパス |
+
+## コードでのバリデーション確認
+
+```tsx
+function validateEmail() {
+  const input = document.getElementById("email") as HTMLInputElement;
+
+  if (input.validity.valueMissing) {
+    console.log("Email is required");
+  } else if (input.validity.typeMismatch) {
+    console.log("Please enter a valid email");
+  } else if (input.validity.valid) {
+    console.log("Email is valid");
+  }
+}
+```
+
+### `checkValidity()`メソッド
+
+要素が有効なら`true`を、無効なら`false`を返します。無効な場合は`invalid`イベントも発火します：
+
+```tsx
+const isValid = input.checkValidity(); // true or false
+```
+
+### `reportValidity()`メソッド
+
+`checkValidity()`と同様ですが、ブラウザのネイティブエラーツールチップも表示します：
+
+```tsx
+input.reportValidity(); // 無効な場合ツールチップを表示
+```
+
+## setCustomValidityによるカスタムバリデーション
+
+組み込みの制約ではカバーしきれないケースがあります。カスタムルール（パスワード強度、「パスワード確認」の一致、非同期のユーザー名利用可能チェックなど）には`setCustomValidity()`を使用します：
+
+```tsx
+function validatePasswordMatch() {
+  const password = document.getElementById("password") as HTMLInputElement;
+  const confirm = document.getElementById("confirm") as HTMLInputElement;
+
+  if (password.value !== confirm.value) {
+    confirm.setCustomValidity("Passwords do not match");
+  } else {
+    // 空文字列を渡してカスタムエラーをクリア
+    confirm.setCustomValidity("");
+  }
+}
+```
+
+**重要な詳細:** カスタムバリデーションエラーをクリアするには**空文字列**`""`を渡す必要があります。`undefined`や`null`を渡しても機能しません。
+
+### Reactでの使用
+
+```tsx
+function ConfirmPassword() {
+  const [password, setPassword] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const confirmRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (confirmRef.current) {
+      if (confirm && password !== confirm) {
+        confirmRef.current.setCustomValidity("Passwords do not match");
+      } else {
+        confirmRef.current.setCustomValidity("");
+      }
+    }
+  }, [password, confirm]);
+
+  return (
+    <form>
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+      />
+      <input
+        ref={confirmRef}
+        type="password"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        required
+      />
+    </form>
+  );
+}
+```
+
+## `invalid`イベント
+
+`checkValidity()`またはフォーム送信が無効なフィールドを検出すると、ブラウザはその要素で`invalid`イベントを発火します：
+
+```tsx
+input.addEventListener("invalid", (e) => {
+  // ブラウザのデフォルトツールチップを防止
+  e.preventDefault();
+
+  // 代わりにカスタムエラーUIを表示
+  showError(input.validationMessage);
+});
+```
+
+Reactでは：
+
+```tsx
+<input
+  onInvalid={(e) => {
+    e.preventDefault();
+    setError(e.currentTarget.validationMessage);
+  }}
+  required
+/>
+```
+
+### `validationMessage`プロパティ
+
+すべてのフォーム要素は、ブラウザのローカライズされたエラーメッセージを含む`validationMessage`文字列を持ちます：
+
+```tsx
+input.validationMessage;
+// "Please fill out this field." (Chrome、英語)
+// "Fill in this field" (Firefox、英語)
+// "This field is required" (Safari、英語)
+```
+
+Base UIはこのメッセージを読み取り、Fieldコンポーネント経由で公開するため、独自のエラーUIに表示できます。
+
+## CSS擬似クラス
+
+ブラウザはJavaScriptなしでバリデーション状態に一致する擬似クラスを提供します：
+
+```css
+/* 有効なinput */
+input:valid {
+  border-color: green;
+}
+
+/* 無効なinput */
+input:invalid {
+  border-color: red;
+}
+
+/* 無効だがユーザー操作後のみ */
+input:user-invalid {
+  border-color: red;
+}
+```
+
+`:user-invalid`擬似クラス（モダンブラウザでサポート）は特に便利です -- ユーザーがフィールドを操作した後にのみマッチするため、ページ読み込み時にエラースタイルが表示されるのを防ぎます。
+
+## Base UIでのこのAPIの使われ方
+
+Base UIのFieldコンポーネントはConstraint Validation APIをラップし、data属性経由で公開します：
+
+| ネイティブAPI | Base UIでの対応 |
+|-------------|----------------|
+| `input.validity.valid` | Fieldの`data-valid` |
+| `input.validity.*`（任意のエラー） | Fieldの`data-invalid` |
+| `input.validationMessage` | Field.Errorのchildren |
+| `:user-invalid` | `data-touched` + `data-invalid` |
+| `setCustomValidity()` | Field.Controlの`validate` prop |
+
+ネイティブAPIとReactコンポーネントステート間のこのブリッジが、Base UIのフォームシステムを軽量かつ強力にしている理由です。
+
+## まとめ
+
+| コンセプト | 学んだこと |
+|-----------|-----------|
+| ValidityState | すべてのネイティブ制約をカバーする10個のブーリアンプロパティ |
+| `checkValidity()` / `reportValidity()` | プログラムによるバリデーションのトリガー |
+| `setCustomValidity("")` | カスタムバリデーション。クリアには空文字列 |
+| `invalid`イベント | ブラウザバリデーションフローへのフック |
+| `validationMessage` | ブラウザのローカライズされたエラーテキスト |
+| CSS擬似クラス | `:valid`、`:invalid`、`:user-invalid` |
+
+この基盤があれば、Fieldコンポーネントを構築する準備が整いました -- ラベル、input、説明、エラーメッセージを1つのアクセシブルな単位にまとめるコンポーネントです。

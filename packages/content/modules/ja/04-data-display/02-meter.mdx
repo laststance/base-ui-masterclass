@@ -1,0 +1,215 @@
+---
+title: "Meterコンポーネントの構築"
+description: "既知の範囲内でスカラー測定値を表示するMeterコンポーネントの構築方法を学びます。low/high/optimumによるセマンティックゾーンも解説します。"
+order: 2
+isFree: false
+---
+
+# Meterコンポーネントの構築
+
+**Meter**コンポーネントは、既知の範囲内でのスカラー測定値を表現します。燃料ゲージ、バッテリーインジケータ、ディスク使用量バーをイメージしてください。見た目はProgressコンポーネントに似ていますが、Meterは根本的に異なる目的を持ち、異なるARIAセマンティクスを使用します。
+
+## MeterとProgressの違い
+
+この区別は多くの開発者を混乱させます。どちらを使うべきか判断する方法は以下の通りです：
+
+| 特徴 | Progress | Meter |
+|------|----------|-------|
+| 表現するもの | 時間経過に伴うタスクの完了 | ある時点でのスカラー値 |
+| 方向性 | 完了に向かって進む | 上下に変動する |
+| 例 | ファイルアップロード（0%〜100%） | CPU使用率（現在73%） |
+| ARIAロール | `progressbar` | `meter` |
+| 不定状態 | あり（完了が不明） | なし（常に値を持つ） |
+
+重要な判断基準は：**その値は目標に向かう進捗を表しているのか、それとも測定値なのか？** ダウンロードのパーセンテージは進捗です。温度の読み取り値はメーターです。
+
+## ネイティブの`<meter>`要素
+
+HTMLにはlow、high、optimumの値に対するビルトインセマンティクスを持つ`<meter>`要素があります。`<progress>`と同様に、ブラウザ間でのスタイリングの不一致に悩まされます。ヘッドレスアプローチにより、アクセシビリティを維持しながら完全なビジュアル制御が可能になります。
+
+```html
+<meter value="0.6" min="0" max="1" low="0.25" high="0.75" optimum="0.5">
+  60%
+</meter>
+```
+
+## Meter用のARIA属性
+
+`meter`ロールは以下の属性とともにARIAでサポートされています：
+
+| 属性 | 目的 | デフォルト |
+|------|------|-----------|
+| `role="meter"` | 要素をメーターとして識別する | 必須 |
+| `aria-valuenow` | 現在値（メーターでは常に必須） | — |
+| `aria-valuemin` | 最小値 | `0` |
+| `aria-valuemax` | 最大値 | `100` |
+| `aria-valuetext` | 値の人間が読める説明 | 任意 |
+| `aria-label` | アクセシブルなラベル | 推奨 |
+
+`progressbar`とは異なり、`meter`ロールは常に`aria-valuenow`を必要とします。値のないメーターは意味がないためです。
+
+## Low、High、Optimumの範囲
+
+Meterを特別にしているのは、**品質ゾーン**を伝える能力です。`low`、`high`、`optimum`プロパティは範囲をセマンティックな区間に分割します：
+
+```
+min ─────── low ─────── high ─────── max
+  [  準最適  ] [  正常  ] [  準最適  ]
+```
+
+`optimum`値は理想的な値がどこにあるかを示します。ブラウザ（または我々のコンポーネントロジック）はこれらの閾値を使用して、現在の値が「良好」「普通」「不良」のいずれであるかを判定します：
+
+- `optimum`が`[low, high]`の範囲内にある場合：その範囲内の値は「良好」、範囲外は「不良」。
+- `optimum < low`の場合：低い値の方が良い（例：レスポンスタイム）。
+- `optimum > high`の場合：高い値の方が良い（例：バッテリー残量）。
+
+## ステータスの算出
+
+利用者がスタイリングに使用できる`data-status`属性を導出します：
+
+```tsx
+function getStatus(
+  value: number,
+  min: number,
+  max: number,
+  low: number,
+  high: number,
+  optimum: number,
+): "good" | "average" | "poor" {
+  // optimumがどのゾーンに属するかを判定
+  const optimumIsLow = optimum < low;
+  const optimumIsHigh = optimum > high;
+
+  if (value >= low && value <= high) {
+    // 値が中間ゾーンにある
+    return optimumIsLow || optimumIsHigh ? "average" : "good";
+  }
+
+  if (value < low) {
+    return optimumIsLow ? "good" : "poor";
+  }
+
+  // value > high
+  return optimumIsHigh ? "good" : "poor";
+}
+```
+
+## コンポーネントAPIの設計
+
+```tsx
+interface MeterProps {
+  value: number;
+  min?: number;      // デフォルト: 0
+  max?: number;      // デフォルト: 100
+  low?: number;      // デフォルト: min
+  high?: number;     // デフォルト: max
+  optimum?: number;  // デフォルト: [min, max]の中間値
+}
+```
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+interface MeterContextValue {
+  value: number;
+  min: number;
+  max: number;
+  low: number;
+  high: number;
+  optimum: number;
+  percentage: number;
+  status: "good" | "average" | "poor";
+}
+
+const MeterContext = React.createContext<MeterContextValue | null>(null);
+
+function useMeterContext() {
+  const ctx = React.useContext(MeterContext);
+  if (!ctx) throw new Error("Meter sub-components must be used within Meter.Root");
+  return ctx;
+}
+
+function Root({
+  value,
+  min = 0,
+  max = 100,
+  low = min,
+  high = max,
+  optimum = (min + max) / 2,
+  children,
+  ...props
+}: MeterProps & React.ComponentPropsWithoutRef<"div">) {
+  const percentage = Math.round(((value - min) / (max - min)) * 100);
+  const status = getStatus(value, min, max, low, high, optimum);
+
+  const ctx = React.useMemo(
+    () => ({ value, min, max, low, high, optimum, percentage, status }),
+    [value, min, max, low, high, optimum, percentage, status],
+  );
+
+  return (
+    <MeterContext value={ctx}>
+      <div
+        role="meter"
+        aria-valuenow={value}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        data-status={status}
+        style={{ "--meter-value": `${percentage}%` } as React.CSSProperties}
+        {...props}
+      >
+        {children}
+      </div>
+    </MeterContext>
+  );
+}
+
+function Indicator(props: React.ComponentPropsWithoutRef<"div">) {
+  const { percentage, status } = useMeterContext();
+
+  return (
+    <div
+      data-status={status}
+      style={{ width: `${percentage}%` }}
+      {...props}
+    />
+  );
+}
+
+export const Meter = { Root, Indicator };
+```
+
+## data属性によるスタイリング
+
+利用者は`data-status`属性に基づいてセマンティックカラーを適用できます：
+
+```css
+[data-status="good"] .meter-indicator {
+  background-color: var(--color-success);
+}
+
+[data-status="average"] .meter-indicator {
+  background-color: var(--color-warning);
+}
+
+[data-status="poor"] .meter-indicator {
+  background-color: var(--color-error);
+}
+```
+
+## 実世界のユースケース
+
+- **バッテリーインジケータ**: `optimum={100}`、`low={20}`、`high={80}` — バッテリー残量が低いと「不良」。
+- **サーバーレスポンスタイム**: `optimum={0}`、`low={200}`、`high={500}`、`max={1000}` — 低いほど良い。
+- **ディスク使用量**: `optimum={0}`、`low={60}`、`high={85}`、`max={100}` — 使用量が少ないほど良い。
+- **音量レベル**: `optimum={50}`、`low={20}`、`high={80}` — 中間が理想的。
+
+## 重要なポイント
+
+1. **MeterはProgressではない** — 測定値にはMeter、タスク完了にはProgressを使用する。
+2. **`aria-valuenow`は常に必須** — 不定状態が可能なProgressとは異なる。
+3. **Low、high、optimum**がセマンティックゾーンを作り、量だけでなく品質を伝える。
+4. **`data-status`**により、良好/普通/不良の状態に対するCSS限定のスタイリングが可能。
+5. **CSSカスタムプロパティ**（`--meter-value`など）でレイアウトをコンポーネントロジックから分離する。

@@ -1,0 +1,358 @@
+---
+title: "Toolbarコンポーネントの構築"
+description: "role='toolbar'、aria-orientation、そしてグループ化されたインタラクティブコントロール用のRoving Tabindexを備えた、アクセシブルなToolbarコンポーネントの構築方法を学びます。"
+order: 3
+isFree: false
+---
+
+# Toolbarコンポーネントの構築
+
+**Toolbar**は、関連するコントロールの集合を格納するコンテナです — ボタン、トグル、ドロップダウントリガー、その他のインタラクティブ要素を含みます。内部にボタンを持つ単なる`<div>`のように見えるかもしれませんが、ARIAの`toolbar`ロールとRoving Tabindexを組み合わせることで、キーボードユーザーが効率的にナビゲートできるファーストクラスのアクセシブルウィジェットに変わります。
+
+## なぜrole="toolbar"を使うのか？
+
+`toolbar`ロールがなければ、スクリーンリーダーは各ボタンを独立した要素として扱います。このロールがあると、支援技術は「ツールバー」をランドマークとして通知し、グループ化されたコントロールに関するコンテキストをユーザーに提供します。Roving Tabindexと組み合わせることで、ツールバーはページのタブ順序における単一のタブストップになります。
+
+```
+toolbarロールなし：
+[Tab] → Bold → [Tab] → Italic → [Tab] → Underline → [Tab] → Font Size → [Tab] → ...
+                                                                         （5つのタブストップ）
+
+toolbarロール + Roving Tabindex：
+[Tab] → Bold → [ArrowRight] → Italic → [ArrowRight] → Underline → [Tab] → 次のセクション
+                                                                   （1つのタブストップ）
+```
+
+## ARIA属性
+
+| 属性 | 適用先 | 目的 |
+|------|--------|------|
+| `role="toolbar"` | コンテナ | 要素をツールバーとして識別 |
+| `aria-label` | コンテナ | ツールバーの人間が読める名前 |
+| `aria-orientation` | コンテナ | `"horizontal"`（デフォルト）または`"vertical"` |
+| `aria-controls` | コンテナ | 任意：ツールバーが操作する要素を参照 |
+
+```tsx
+<div role="toolbar" aria-label="Text formatting" aria-orientation="horizontal">
+  <button>Bold</button>
+  <button>Italic</button>
+  <button>Underline</button>
+</div>
+```
+
+## ToolbarとTablistの比較
+
+ToolbarとTablistはどちらもRoving Tabindexを使用しますが、目的が異なります：
+
+| 特徴 | Toolbar | Tablist |
+|------|---------|---------|
+| 目的 | アクションコントロールのグループ | パネル間のタブナビゲーション |
+| 選択 | 相互排他なし（複数がアクティブ可） | 正確に1つのタブが選択 |
+| `aria-selected` | 使用しない | アクティブなタブで使用 |
+| クリック時のアクション | アクションを実行（トグル、実行） | パネルを切り替え |
+| ARIAロール | `toolbar` | `tablist` |
+
+## コンポーネントAPIの設計
+
+```tsx
+interface ToolbarProps {
+  orientation?: "horizontal" | "vertical";
+}
+```
+
+Compound Component：
+
+- **`Toolbar.Root`** — `role="toolbar"`とキーボードナビゲーションを持つコンテナ。
+- **`Toolbar.Button`** — ツールバー内のインタラクティブアイテム。
+- **`Toolbar.Separator`** — グループ間のビジュアルおよびセマンティックな区切り。
+- **`Toolbar.Link`** — ナビゲーション用のリンクアイテム。
+
+## 完全な実装
+
+```tsx
+import * as React from "react";
+
+// --- Context ---
+
+interface ToolbarContextValue {
+  orientation: "horizontal" | "vertical";
+  registerItem: (element: HTMLElement) => () => void;
+  handleKeyDown: (event: React.KeyboardEvent) => void;
+  activeElement: HTMLElement | null;
+}
+
+const ToolbarContext = React.createContext<ToolbarContextValue | null>(null);
+
+function useToolbarContext() {
+  const ctx = React.useContext(ToolbarContext);
+  if (!ctx) throw new Error("Toolbar sub-components must be used within Toolbar.Root");
+  return ctx;
+}
+
+// --- Root ---
+
+function Root({
+  orientation = "horizontal",
+  children,
+  ...props
+}: ToolbarProps & React.ComponentPropsWithoutRef<"div">) {
+  const itemsRef = React.useRef<HTMLElement[]>([]);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+
+  const registerItem = React.useCallback((element: HTMLElement) => {
+    if (!itemsRef.current.includes(element)) {
+      // DOM順序で挿入するためにポジションを比較
+      const items = itemsRef.current;
+      const index = items.findIndex(
+        (item) => element.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      if (index === -1) {
+        items.push(element);
+      } else {
+        items.splice(index, 0, element);
+      }
+    }
+    return () => {
+      itemsRef.current = itemsRef.current.filter((item) => item !== element);
+    };
+  }, []);
+
+  const moveFocus = React.useCallback((nextIndex: number) => {
+    const items = itemsRef.current;
+    const clamped = ((nextIndex % items.length) + items.length) % items.length;
+    setActiveIndex(clamped);
+    items[clamped]?.focus();
+  }, []);
+
+  const handleKeyDown = React.useCallback(
+    (event: React.KeyboardEvent) => {
+      const items = itemsRef.current;
+      const currentIdx = items.indexOf(event.currentTarget as HTMLElement);
+      if (currentIdx === -1) return;
+
+      const forwardKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+      const backwardKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
+
+      switch (event.key) {
+        case forwardKey: {
+          event.preventDefault();
+          moveFocus(currentIdx + 1);
+          break;
+        }
+        case backwardKey: {
+          event.preventDefault();
+          moveFocus(currentIdx - 1);
+          break;
+        }
+        case "Home": {
+          event.preventDefault();
+          moveFocus(0);
+          break;
+        }
+        case "End": {
+          event.preventDefault();
+          moveFocus(items.length - 1);
+          break;
+        }
+      }
+    },
+    [orientation, moveFocus],
+  );
+
+  const ctx = React.useMemo(
+    () => ({
+      orientation,
+      registerItem,
+      handleKeyDown,
+      activeElement: itemsRef.current[activeIndex] ?? null,
+    }),
+    [orientation, registerItem, handleKeyDown, activeIndex],
+  );
+
+  return (
+    <ToolbarContext value={ctx}>
+      <div
+        role="toolbar"
+        aria-orientation={orientation}
+        data-orientation={orientation}
+        {...props}
+      >
+        {children}
+      </div>
+    </ToolbarContext>
+  );
+}
+
+// --- Button ---
+
+function Button({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"button">) {
+  const { registerItem, handleKeyDown, activeElement } = useToolbarContext();
+  const ref = React.useRef<HTMLButtonElement | null>(null);
+
+  React.useEffect(() => {
+    if (ref.current) {
+      return registerItem(ref.current);
+    }
+  }, [registerItem]);
+
+  const isActive = ref.current === activeElement;
+
+  return (
+    <button
+      type="button"
+      ref={ref}
+      tabIndex={isActive ? 0 : -1}
+      onKeyDown={handleKeyDown}
+      onFocus={() => {
+        // クリックでフォーカスされた場合にアクティブインデックスを同期
+      }}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+// --- Separator ---
+
+function Separator(props: React.ComponentPropsWithoutRef<"div">) {
+  const { orientation } = useToolbarContext();
+
+  return (
+    <div
+      role="separator"
+      aria-orientation={orientation === "horizontal" ? "vertical" : "horizontal"}
+      data-orientation={orientation === "horizontal" ? "vertical" : "horizontal"}
+      {...props}
+    />
+  );
+}
+
+// --- Link ---
+
+function Link({
+  children,
+  ...props
+}: React.ComponentPropsWithoutRef<"a">) {
+  const { registerItem, handleKeyDown, activeElement } = useToolbarContext();
+  const ref = React.useRef<HTMLAnchorElement | null>(null);
+
+  React.useEffect(() => {
+    if (ref.current) {
+      return registerItem(ref.current);
+    }
+  }, [registerItem]);
+
+  const isActive = ref.current === activeElement;
+
+  return (
+    <a
+      ref={ref}
+      tabIndex={isActive ? 0 : -1}
+      onKeyDown={handleKeyDown}
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
+
+export const Toolbar = { Root, Button, Separator, Link };
+```
+
+## 使用例
+
+```tsx
+<Toolbar.Root aria-label="Text formatting">
+  <Toolbar.Button onClick={() => toggleBold()}>
+    <BoldIcon />
+  </Toolbar.Button>
+  <Toolbar.Button onClick={() => toggleItalic()}>
+    <ItalicIcon />
+  </Toolbar.Button>
+  <Toolbar.Button onClick={() => toggleUnderline()}>
+    <UnderlineIcon />
+  </Toolbar.Button>
+
+  <Toolbar.Separator />
+
+  <Toolbar.Button onClick={() => alignLeft()}>
+    <AlignLeftIcon />
+  </Toolbar.Button>
+  <Toolbar.Button onClick={() => alignCenter()}>
+    <AlignCenterIcon />
+  </Toolbar.Button>
+  <Toolbar.Button onClick={() => alignRight()}>
+    <AlignRightIcon />
+  </Toolbar.Button>
+
+  <Toolbar.Separator />
+
+  <Toolbar.Link href="/help">Help</Toolbar.Link>
+</Toolbar.Root>
+```
+
+## 混在するコントロールタイプの処理
+
+実際のツールバーには、トグルボタン、ドロップダウン、リンクなど異なるタイプのコントロールが含まれることが多いです。各タイプで必要な動作がやや異なります：
+
+| コントロールタイプ | tabIndex | アクティベーション |
+|-------------------|----------|-------------------|
+| Button | Roving Tabindex | Click / Enter / Space |
+| Toggle Button | Roving Tabindex + aria-pressed | Click / Enter / Space |
+| Link | Roving Tabindex | Click / Enter |
+| Dropdown Trigger | Roving Tabindex | Click / Enter / Space / ArrowDown |
+
+Roving Tabindexは均一に適用されます — ツールバー内のすべてのインタラクティブ要素が、タイプに関係なく矢印キーナビゲーションに参加します。
+
+## Separatorのセマンティクス
+
+`Toolbar.Separator`は`role="separator"`を使用して、コントロールのグループ間にセマンティックな境界を作ります。セパレータの`aria-orientation`はツールバーの方向と**反対**であることに注意してください：
+
+- 水平ツールバーでは、セパレータは垂直の区切り。
+- 垂直ツールバーでは、セパレータは水平の区切り。
+
+スクリーンリーダーはセパレータを通知し、ユーザーがコントロールのグループ構造を理解する助けとなります。
+
+## スタイリングに関する考慮事項
+
+```css
+[role="toolbar"] {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+[role="toolbar"][data-orientation="vertical"] {
+  flex-direction: column;
+}
+
+[role="separator"] {
+  width: 1px;
+  height: 24px;
+  background: var(--color-border);
+}
+
+[data-orientation="horizontal"] [role="separator"] {
+  width: 1px;
+  align-self: stretch;
+}
+
+[data-orientation="vertical"] [role="separator"] {
+  height: 1px;
+  align-self: stretch;
+}
+```
+
+## 重要なポイント
+
+1. **`role="toolbar"`**が関連するコントロールを単一のアクセシブルランドマークにグループ化する。
+2. **Roving Tabindex**でツールバーを矢印キーナビゲーション付きの単一タブストップに削減する。
+3. **`aria-orientation`**がナビゲーションに使用する矢印キーを決定する。
+4. **セパレータ**はツールバーと反対の方向を使用して、ビジュアルおよびセマンティックな区切りを作成する。
+5. **混在するコントロールタイプ**（ボタン、リンク、トグル）がすべて同じRoving Tabindexに参加する。
+6. **DOM順序でアイテムを登録**する — `compareDocumentPosition`を使用して、レンダリング順序に関係なく正しい矢印キーナビゲーションを実現。
+7. ツールバーパターンは**メニューバー、タブリスト、ツリービュー**でも微細なバリエーションとともに再利用される。
