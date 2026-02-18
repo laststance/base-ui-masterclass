@@ -36,7 +36,12 @@
     "solution": "Solution",
     "reset": "Reset",
     "solutionIndicator": "Showing reference solution — click \"My Code\" to return to your code",
-    "notFound": "Exercise \"{id}\" not found."
+    "notFound": "Exercise \"{id}\" not found.",
+    "allTestsPassed": "All tests passed!",
+    "testsFailed": "{count} test(s) failed",
+    "markComplete": "Mark Complete",
+    "completed": "Completed",
+    "completing": "Saving..."
   },
   "paywall": {
     "signInTitle": "Sign in to access this lesson",

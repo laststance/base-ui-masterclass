@@ -36,7 +36,12 @@
     "solution": "解答を見る",
     "reset": "リセット",
     "solutionIndicator": "参考解答を表示中 — 自分のコードに戻すには「自分のコード」をクリック",
-    "notFound": "エクササイズ「{id}」が見つかりません。"
+    "notFound": "エクササイズ「{id}」が見つかりません。",
+    "allTestsPassed": "全テスト合格！",
+    "testsFailed": "{count}件のテストが失敗しました",
+    "markComplete": "完了にする",
+    "completed": "完了済み",
+    "completing": "保存中..."
   },
   "paywall": {
     "signInTitle": "このレッスンにアクセスするにはログインが必要です",

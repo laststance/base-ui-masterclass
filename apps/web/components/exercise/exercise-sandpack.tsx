@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useTransition } from "react";
 import {
   SandpackProvider,
   SandpackLayout,
@@ -10,6 +10,15 @@ import {
 import { useTranslations } from "next-intl";
 import { useExercisePersistence } from "./use-exercise-persistence";
 import { SANDPACK_THEME } from "@/lib/config/sandpack-theme";
+import { completeExercise } from "@/lib/actions/progress";
+
+type TestStatus = "pass" | "fail";
+
+interface TestResult {
+  status: TestStatus;
+  passed: number;
+  failed: number;
+}
 
 interface ExerciseSandpackProps {
   exerciseId: string;
@@ -18,11 +27,50 @@ interface ExerciseSandpackProps {
   testCode: string;
   hints: string[];
   dependencies?: Record<string, string>;
+  initialCompleted?: boolean;
+}
+
+/**
+ * Collects pass/fail counts from Sandpack's nested spec structure.
+ *
+ * @param specs - Sandpack onComplete specs (Record of Spec objects)
+ * @returns Aggregated test result with status, passed, and failed counts
+ *
+ * @example
+ * summarizeSpecs({ "file.test.tsx": { name: "...", tests: {...}, describes: {...} } })
+ * // => { status: "pass", passed: 3, failed: 0 }
+ */
+function summarizeSpecs(
+  specs: Record<string, { tests: Record<string, { status: string }>; describes: Record<string, unknown> }>,
+): TestResult {
+  let passed = 0;
+  let failed = 0;
+
+  function walk(node: { tests?: Record<string, { status: string }>; describes?: Record<string, unknown> }) {
+    if (node.tests) {
+      for (const test of Object.values(node.tests)) {
+        if (test.status === "pass") passed++;
+        else if (test.status === "fail") failed++;
+      }
+    }
+    if (node.describes) {
+      for (const desc of Object.values(node.describes)) {
+        walk(desc as { tests?: Record<string, { status: string }>; describes?: Record<string, unknown> });
+      }
+    }
+  }
+
+  for (const spec of Object.values(specs)) {
+    walk(spec);
+  }
+
+  return { status: failed === 0 && passed > 0 ? "pass" : "fail", passed, failed };
 }
 
 /**
  * Interactive exercise environment powered by Sandpack.
- * Provides code editor, test runner, hints, and solution reveal.
+ * Provides code editor, test runner, hints, solution reveal,
+ * test-pass detection, and exercise completion.
  *
  * @param exerciseId - Unique identifier for localStorage persistence
  * @param initialCode - Starting code template
@@ -30,6 +78,7 @@ interface ExerciseSandpackProps {
  * @param testCode - Jest test suite run by SandpackTests
  * @param hints - Progressive hints shown after failed attempts
  * @param dependencies - Additional npm dependencies for the exercise
+ * @param initialCompleted - Whether the exercise was already completed
  *
  * @example
  * <ExerciseSandpack
@@ -38,6 +87,7 @@ interface ExerciseSandpackProps {
  *   solutionCode={exercise.files.solution}
  *   testCode={exercise.files.tests}
  *   hints={exercise.meta.hints.en}
+ *   initialCompleted={false}
  * />
  */
 export function ExerciseSandpack({
@@ -47,6 +97,7 @@ export function ExerciseSandpack({
   testCode,
   hints,
   dependencies = {},
+  initialCompleted = false,
 }: ExerciseSandpackProps) {
   const t = useTranslations("exercise");
   const [code, setCode, clearSaved, hasSavedCode] = useExercisePersistence(
@@ -55,6 +106,9 @@ export function ExerciseSandpack({
   );
   const [showSolution, setShowSolution] = useState(false);
   const [hintIndex, setHintIndex] = useState(-1);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [isCompleted, setIsCompleted] = useState(initialCompleted);
+  const [isPending, startTransition] = useTransition();
 
   const handleShowNextHint = useCallback(() => {
     setHintIndex((prev) => Math.min(prev + 1, hints.length - 1));
@@ -68,9 +122,27 @@ export function ExerciseSandpack({
     clearSaved();
     setShowSolution(false);
     setHintIndex(-1);
+    setTestResult(null);
   }, [clearSaved]);
 
+  const handleTestComplete = useCallback(
+    (specs: Record<string, { tests: Record<string, { status: string }>; describes: Record<string, unknown> }>) => {
+      setTestResult(summarizeSpecs(specs));
+    },
+    [],
+  );
+
+  const handleMarkComplete = useCallback(() => {
+    startTransition(async () => {
+      const result = await completeExercise(exerciseId);
+      if (result.success) {
+        setIsCompleted(true);
+      }
+    });
+  }, [exerciseId]);
+
   const activeCode = showSolution ? solutionCode : code;
+  const allPassed = testResult?.status === "pass";
 
   return (
     <div className="my-8 rounded-lg border border-accent/30 overflow-hidden">
@@ -84,6 +156,11 @@ export function ExerciseSandpack({
           {hasSavedCode && !showSolution && (
             <span className="text-xs text-text-muted bg-surface-elevated px-1.5 py-0.5 rounded">
               {t("saved")}
+            </span>
+          )}
+          {isCompleted && (
+            <span className="text-xs text-success bg-success/10 px-1.5 py-0.5 rounded font-semibold">
+              {t("completed")}
             </span>
           )}
         </div>
@@ -162,9 +239,46 @@ export function ExerciseSandpack({
           />
           <SandpackTests
             style={{ minHeight: "300px" }}
+            onComplete={handleTestComplete}
           />
         </SandpackLayout>
       </SandpackProvider>
+
+      {/* Test result banner + Complete button */}
+      {testResult && (
+        <div
+          className={`border-t px-4 py-3 flex items-center justify-between ${
+            allPassed
+              ? "bg-success/5 border-success/20"
+              : "bg-error/5 border-error/20"
+          }`}
+        >
+          <span
+            className={`text-sm font-semibold ${
+              allPassed ? "text-success" : "text-error"
+            }`}
+          >
+            {allPassed
+              ? t("allTestsPassed")
+              : t("testsFailed", { count: testResult.failed })}
+          </span>
+          {allPassed && !isCompleted && (
+            <button
+              type="button"
+              onClick={handleMarkComplete}
+              disabled={isPending}
+              className="text-sm px-4 py-1.5 rounded-md bg-success text-background font-semibold hover:bg-success/90 disabled:opacity-60 transition-colors"
+            >
+              {isPending ? t("completing") : t("markComplete")}
+            </button>
+          )}
+          {allPassed && isCompleted && (
+            <span className="text-sm text-success font-semibold">
+              {t("completed")}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Solution indicator */}
       {showSolution && (
