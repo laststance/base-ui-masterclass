@@ -43,6 +43,7 @@
     "signInDescription": "This is a premium lesson. Sign in with your account and verify your license to continue.",
     "purchaseTitle": "Purchase Required",
     "purchaseDescription": "Get lifetime access to all 35 components, 45 lessons, and the Discord community.",
+    "price": "$500",
     "buyNow": "Buy Now",
     "enterLicense": "Already purchased? Enter your license key"
   }

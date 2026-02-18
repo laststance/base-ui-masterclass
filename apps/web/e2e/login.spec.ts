@@ -26,7 +26,6 @@ test.describe("Login Page", () => {
   });
 
   test("shows terms of service notice", async ({ page }) => {
-    // The login page shows a ToS note at the bottom
-    await expect(page.locator("main")).toContainText(/.+/);
+    await expect(page.getByText(/terms|利用規約/i)).toBeVisible();
   });
 });

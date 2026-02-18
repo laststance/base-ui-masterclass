@@ -16,7 +16,7 @@ test.describe("Modules List Page", () => {
   });
 
   test("displays curriculum subtitle", async ({ page }) => {
-    await expect(page.getByText("Curriculum")).toBeVisible();
+    await expect(page.getByText(/Curriculum|カリキュラム/)).toBeVisible();
   });
 
   test("lists all 13 module cards as links", async ({ page }) => {

@@ -43,6 +43,7 @@
     "signInDescription": "これはプレミアムレッスンです。アカウントにログインし、ライセンスを確認してください。",
     "purchaseTitle": "購入が必要です",
     "purchaseDescription": "全35コンポーネント、45レッスン、Discordコミュニティへのライフタイムアクセスを取得しましょう。",
+    "price": "$500",
     "buyNow": "今すぐ購入",
     "enterLicense": "購入済みの方はライセンスキーを入力してください"
   }

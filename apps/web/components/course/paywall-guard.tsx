@@ -93,7 +93,7 @@ export async function PaywallGuard({ session, children }: PaywallGuardProps) {
         <p className="mb-4 text-text-secondary leading-relaxed">
           {t("purchaseDescription")}
         </p>
-        <p className="mb-8 text-3xl font-display font-800 text-accent">$500</p>
+        <p className="mb-8 text-3xl font-display font-800 text-accent">{t("price")}</p>
         <div className="flex flex-col gap-3">
           <a
             href="#pricing"
@@ -103,7 +103,7 @@ export async function PaywallGuard({ session, children }: PaywallGuardProps) {
           </a>
           <Link
             href="/license"
-            className="text-sm text-text-muted hover:text-text-secondary transition-colors"
+            className="inline-flex min-h-[44px] items-center text-sm text-text-muted hover:text-text-secondary transition-colors"
           >
             {t("enterLicense")}
           </Link>

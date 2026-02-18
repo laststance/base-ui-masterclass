@@ -32,8 +32,8 @@ test.describe("i18n Locale Switching", () => {
 
   test("login page renders in Japanese at /ja/login", async ({ page }) => {
     await page.goto("/ja/login");
-    // Login page should show Japanese OAuth button labels
-    await expect(page.getByRole("button").first()).toBeVisible();
+    // Login page should show Japanese heading text
+    await expect(page.getByText("ログイン").first()).toBeVisible();
   });
 
   test("free lesson renders in English at /modules/00-foundation/01-introduction", async ({

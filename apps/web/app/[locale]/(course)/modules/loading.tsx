@@ -2,6 +2,8 @@
  * Skeleton loading state for the modules list page.
  * Shows placeholder cards matching the actual layout during navigation.
  *
+ * @returns Animated skeleton placeholders for the modules list
+ *
  * @example
  * // Automatically rendered by Next.js during page transition to /modules
  */
