@@ -10,7 +10,8 @@
     "test:e2e": "turbo run test:e2e",
     "test:content": "turbo run test:content",
     "db:generate": "turbo run db:generate",
-    "db:push": "turbo run db:push"
+    "db:push": "turbo run db:push",
+    "db:setup": "docker compose up -d && DATABASE_URL=postgresql://e2e:e2e@localhost:5433/base_ui_e2e pnpm --filter database db:push"
   },
   "devDependencies": {
     "turbo": "^2.4.4",
