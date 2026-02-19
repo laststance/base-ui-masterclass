@@ -266,9 +266,7 @@ export function ExerciseSandpack({
         customSetup={{
           dependencies: {
             "@testing-library/react": "^14.0.0",
-            "@testing-library/jest-dom": "^6.0.0",
-            react: "^18.2.0",
-            "react-dom": "^18.2.0",
+            "@testing-library/jest-dom": "^5.17.0",
             ...dependencies,
           },
         }}

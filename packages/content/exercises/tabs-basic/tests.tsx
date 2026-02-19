@@ -134,7 +134,7 @@ describe("Tabs", () => {
   });
 
   test("calls onValueChange when tab is selected", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     render(
       <Tabs.Root defaultValue="tab-1" onValueChange={onValueChange}>
         <Tabs.List>

@@ -49,7 +49,7 @@ describe("Slider", () => {
   });
 
   test("ArrowRight increments value by step", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 50, step: 5, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
@@ -57,7 +57,7 @@ describe("Slider", () => {
   });
 
   test("ArrowLeft decrements value by step", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 50, step: 5, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "ArrowLeft" });
@@ -65,7 +65,7 @@ describe("Slider", () => {
   });
 
   test("ArrowUp increments value by step", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 30, step: 10, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "ArrowUp" });
@@ -73,7 +73,7 @@ describe("Slider", () => {
   });
 
   test("ArrowDown decrements value by step", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 30, step: 10, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "ArrowDown" });
@@ -81,7 +81,7 @@ describe("Slider", () => {
   });
 
   test("Home key sets value to min", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 50, min: 0, max: 100, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "Home" });
@@ -89,7 +89,7 @@ describe("Slider", () => {
   });
 
   test("End key sets value to max", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 50, min: 0, max: 100, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "End" });
@@ -97,7 +97,7 @@ describe("Slider", () => {
   });
 
   test("value is clamped to max", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 98, min: 0, max: 100, step: 5, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
@@ -105,7 +105,7 @@ describe("Slider", () => {
   });
 
   test("value is clamped to min", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderSlider({ defaultValue: 2, min: 0, max: 100, step: 5, onValueChange });
     const thumb = screen.getByRole("slider");
     fireEvent.keyDown(thumb, { key: "ArrowLeft" });

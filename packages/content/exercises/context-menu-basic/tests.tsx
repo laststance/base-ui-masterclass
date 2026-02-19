@@ -2,9 +2,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ContextMenu } from "./initial";
 
 function renderContextMenu() {
-  const onCopy = vi.fn();
-  const onPaste = vi.fn();
-  const onDelete = vi.fn();
+  const onCopy = jest.fn();
+  const onPaste = jest.fn();
+  const onDelete = jest.fn();
 
   const result = render(
     <ContextMenu.Root>

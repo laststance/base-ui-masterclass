@@ -77,7 +77,7 @@ describe("Switch", () => {
   });
 
   test("calls onCheckedChange callback", () => {
-    const onChange = vi.fn();
+    const onChange = jest.fn();
     render(<Switch onCheckedChange={onChange}>Toggle</Switch>);
     const sw = screen.getByRole("switch");
 
@@ -89,7 +89,7 @@ describe("Switch", () => {
   });
 
   test("works in controlled mode", () => {
-    const onChange = vi.fn();
+    const onChange = jest.fn();
     const { rerender } = render(
       <Switch checked={false} onCheckedChange={onChange}>Toggle</Switch>
     );

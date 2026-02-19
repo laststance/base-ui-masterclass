@@ -30,7 +30,7 @@ describe("useControllableState", () => {
     });
 
     test("calls onChange callback when setValue is called", () => {
-      const onChange = vi.fn();
+      const onChange = jest.fn();
 
       const { result } = renderHook(() =>
         useControllableState({
@@ -100,7 +100,7 @@ describe("useControllableState", () => {
     });
 
     test("calls onChange callback even in controlled mode", () => {
-      const onChange = vi.fn();
+      const onChange = jest.fn();
 
       const { result } = renderHook(() =>
         useControllableState({

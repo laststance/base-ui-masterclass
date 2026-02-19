@@ -47,7 +47,7 @@ describe("Checkbox", () => {
   });
 
   test("indeterminate transitions to checked on click", () => {
-    const onChange = vi.fn();
+    const onChange = jest.fn();
     render(
       <Checkbox
         defaultChecked={"indeterminate" as any}
@@ -91,7 +91,7 @@ describe("Checkbox", () => {
   });
 
   test("calls onCheckedChange callback", () => {
-    const onChange = vi.fn();
+    const onChange = jest.fn();
     render(<Checkbox onCheckedChange={onChange}>Check me</Checkbox>);
     const cb = screen.getByRole("checkbox");
 
@@ -103,7 +103,7 @@ describe("Checkbox", () => {
   });
 
   test("works in controlled mode", () => {
-    const onChange = vi.fn();
+    const onChange = jest.fn();
     const { rerender } = render(
       <Checkbox checked={false} onCheckedChange={onChange}>Check me</Checkbox>
     );

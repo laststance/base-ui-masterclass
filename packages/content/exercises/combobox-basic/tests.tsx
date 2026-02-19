@@ -126,7 +126,7 @@ describe("Combobox", () => {
   });
 
   test("calls onValueChange when an option is selected", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     render(
       <Combobox.Root onValueChange={onValueChange}>
         <Combobox.Input />

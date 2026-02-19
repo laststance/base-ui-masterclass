@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { AlertDialog } from "./initial";
 
 function renderAlertDialog(defaultOpen = false) {
-  const onAction = vi.fn();
+  const onAction = jest.fn();
   const result = render(
     <AlertDialog.Root defaultOpen={defaultOpen}>
       <AlertDialog.Trigger>Delete</AlertDialog.Trigger>
