@@ -192,7 +192,7 @@ export function ExerciseSandpack({
   const allPassed = testResult?.status === "pass";
 
   return (
-    <div className="my-8 rounded-lg border border-accent/30 overflow-hidden">
+    <div data-testid={`exercise-${exerciseId}`} className="my-8 rounded-lg border border-accent/30 overflow-hidden">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-surface px-4 py-2 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">

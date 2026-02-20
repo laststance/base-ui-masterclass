@@ -52,31 +52,40 @@ test.describe("All Exercises — Solution Tests", () => {
       purchasedPage,
     }) => {
       // 1. Navigate to the lesson page containing this exercise
-      await purchasedPage.goto(exercise.url, { waitUntil: "networkidle" });
+      await purchasedPage.goto(exercise.url, { waitUntil: "load" });
 
-      // 2. Find the exercise section by its exercise ID label
-      const exerciseLabel = purchasedPage.locator(`text=${exercise.id}`).first();
-      await exerciseLabel.scrollIntoViewIfNeeded();
+      // 2. Find the exercise section by its stable data-testid
+      const exerciseSection = purchasedPage.locator(
+        `[data-testid="exercise-${exercise.id}"]`,
+      );
+      await exerciseSection.scrollIntoViewIfNeeded();
 
-      // 3. Click "Show Solution" button
-      const solutionBtn = purchasedPage
-        .getByRole("button", { name: /Solution|解答/i })
-        .first();
+      // 3. Click "Show Solution" button scoped to this exercise
+      const solutionBtn = exerciseSection.getByRole("button", {
+        name: /Solution|解答/i,
+      });
       await expect(solutionBtn).toBeVisible({ timeout: 15_000 });
       await solutionBtn.click();
 
       // 4. Wait for Sandpack to compile and run tests.
-      //    The result banner has role="status" with either success or failure text.
-      //    We wait up to 90 seconds for Sandpack to finish.
-      const statusArea = purchasedPage.locator('[role="status"]').last();
+      //    Race success vs failure — fail fast on the error path.
+      const statusArea = exerciseSection.locator('[role="status"]').last();
 
-      // Wait for either "All tests passed" or a failure message
-      await expect(
-        statusArea.getByText(/All tests passed|全テスト合格/i),
-      ).toBeVisible({ timeout: 90_000 });
+      await expect(async () => {
+        const successVisible = await statusArea
+          .getByText(/All tests passed|全テスト合格/i)
+          .isVisible();
+        const failureVisible = await statusArea
+          .getByText(/Tests failed|テスト失敗/i)
+          .isVisible();
+        if (failureVisible) {
+          throw new Error(`[${exercise.id}] Sandpack reported test failure`);
+        }
+        expect(successVisible).toBe(true);
+      }).toPass({ timeout: 90_000, intervals: [1_000] });
 
-      // 5. Verify the success banner is green (has success class)
-      const banner = statusArea.locator(".bg-success\\/5").first();
+      // 5. Verify the success banner is present
+      const banner = exerciseSection.locator(".bg-success\\/5").first();
       await expect(banner).toBeVisible();
     });
   }
