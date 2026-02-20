@@ -123,7 +123,7 @@ describe("Select", () => {
   });
 
   test("calls onValueChange when an option is selected", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     render(
       <Select.Root onValueChange={onValueChange}>
         <Select.Trigger>

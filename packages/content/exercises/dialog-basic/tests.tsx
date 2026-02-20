@@ -138,7 +138,7 @@ describe("Dialog", () => {
   });
 
   test("calls onOpenChange when dialog opens and closes", () => {
-    const onOpenChange = vi.fn();
+    const onOpenChange = jest.fn();
     render(
       <Dialog.Root onOpenChange={onOpenChange}>
         <Dialog.Trigger>Open</Dialog.Trigger>

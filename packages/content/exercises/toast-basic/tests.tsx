@@ -12,11 +12,11 @@ function renderWithProvider(ui?: React.ReactNode) {
 
 describe("Toast", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    jest.useFakeTimers();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 
   test("renders provider with children", () => {
@@ -103,7 +103,7 @@ describe("Toast", () => {
     });
     expect(screen.getByText("Auto dismiss")).toBeDefined();
     act(() => {
-      vi.advanceTimersByTime(3000);
+      jest.advanceTimersByTime(3000);
     });
     expect(screen.queryByText("Auto dismiss")).toBeNull();
   });
@@ -138,21 +138,21 @@ describe("Toast", () => {
 
     // Advance 1 second
     act(() => {
-      vi.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(1000);
     });
     expect(screen.getByText("Hover me")).toBeDefined();
 
     // Hover to pause
     fireEvent.mouseEnter(toastEl);
     act(() => {
-      vi.advanceTimersByTime(5000); // Way past original duration
+      jest.advanceTimersByTime(5000); // Way past original duration
     });
     expect(screen.getByText("Hover me")).toBeDefined(); // Still visible
 
     // Unhover to resume
     fireEvent.mouseLeave(toastEl);
     act(() => {
-      vi.advanceTimersByTime(2000); // Remaining ~2 seconds
+      jest.advanceTimersByTime(2000); // Remaining ~2 seconds
     });
     expect(screen.queryByText("Hover me")).toBeNull();
   });

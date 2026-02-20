@@ -14,11 +14,11 @@ function renderTooltip(props: { openDelay?: number; closeDelay?: number } = {}) 
 
 describe("Tooltip", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    jest.useFakeTimers();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 
   test("tooltip is hidden by default", () => {
@@ -33,7 +33,7 @@ describe("Tooltip", () => {
     fireEvent.mouseEnter(trigger);
     expect(screen.queryByRole("tooltip")).toBeNull();
 
-    act(() => vi.advanceTimersByTime(100));
+    act(() => jest.advanceTimersByTime(100));
     expect(screen.getByRole("tooltip")).toBeDefined();
   });
 
@@ -42,11 +42,11 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
     expect(screen.getByRole("tooltip")).toBeDefined();
 
     fireEvent.mouseLeave(trigger);
-    act(() => vi.advanceTimersByTime(50));
+    act(() => jest.advanceTimersByTime(50));
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
@@ -55,7 +55,7 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.focus(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
     expect(screen.getByRole("tooltip")).toBeDefined();
   });
 
@@ -64,7 +64,7 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.focus(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
     expect(screen.getByRole("tooltip")).toBeDefined();
 
     fireEvent.blur(trigger);
@@ -76,7 +76,7 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
 
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip).toBeDefined();
@@ -89,7 +89,7 @@ describe("Tooltip", () => {
     expect(trigger.getAttribute("aria-describedby")).toBeNull();
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
 
     const tooltip = screen.getByRole("tooltip");
     expect(trigger.getAttribute("aria-describedby")).toBe(tooltip.id);
@@ -107,7 +107,7 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
     expect(screen.getByRole("tooltip")).toBeDefined();
 
     fireEvent.keyDown(trigger, { key: "Escape" });
@@ -119,7 +119,7 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
 
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip.closest("body")).toBe(document.body);
@@ -130,7 +130,7 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(0));
+    act(() => jest.advanceTimersByTime(0));
 
     expect(screen.getByRole("tooltip").textContent).toBe("Tooltip text");
   });
@@ -140,9 +140,9 @@ describe("Tooltip", () => {
     const trigger = screen.getByRole("button", { name: "Hover me" });
 
     fireEvent.mouseEnter(trigger);
-    act(() => vi.advanceTimersByTime(100));
+    act(() => jest.advanceTimersByTime(100));
     fireEvent.mouseLeave(trigger);
-    act(() => vi.advanceTimersByTime(200));
+    act(() => jest.advanceTimersByTime(200));
 
     expect(screen.queryByRole("tooltip")).toBeNull();
   });

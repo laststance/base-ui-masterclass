@@ -104,7 +104,7 @@ describe("Collapsible", () => {
   });
 
   test("calls onOpenChange when toggled", () => {
-    const onOpenChange = vi.fn();
+    const onOpenChange = jest.fn();
     render(
       <Collapsible.Root onOpenChange={onOpenChange}>
         <Collapsible.Trigger>Toggle</Collapsible.Trigger>

@@ -40,56 +40,56 @@ describe("NumberField", () => {
   });
 
   test("clicking increment button increases value by step", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 5, step: 1, onValueChange });
     fireEvent.click(screen.getByLabelText("Increment"));
     expect(onValueChange).toHaveBeenCalledWith(6);
   });
 
   test("clicking decrement button decreases value by step", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 5, step: 1, onValueChange });
     fireEvent.click(screen.getByLabelText("Decrement"));
     expect(onValueChange).toHaveBeenCalledWith(4);
   });
 
   test("ArrowUp key increments value", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 10, step: 2, onValueChange });
     fireEvent.keyDown(screen.getByRole("spinbutton"), { key: "ArrowUp" });
     expect(onValueChange).toHaveBeenCalledWith(12);
   });
 
   test("ArrowDown key decrements value", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 10, step: 2, onValueChange });
     fireEvent.keyDown(screen.getByRole("spinbutton"), { key: "ArrowDown" });
     expect(onValueChange).toHaveBeenCalledWith(8);
   });
 
   test("Home key sets value to min", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 50, min: 0, max: 100, onValueChange });
     fireEvent.keyDown(screen.getByRole("spinbutton"), { key: "Home" });
     expect(onValueChange).toHaveBeenCalledWith(0);
   });
 
   test("End key sets value to max", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 50, min: 0, max: 100, onValueChange });
     fireEvent.keyDown(screen.getByRole("spinbutton"), { key: "End" });
     expect(onValueChange).toHaveBeenCalledWith(100);
   });
 
   test("value is clamped to max on increment", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 99, min: 0, max: 100, step: 5, onValueChange });
     fireEvent.keyDown(screen.getByRole("spinbutton"), { key: "ArrowUp" });
     expect(onValueChange).toHaveBeenCalledWith(100);
   });
 
   test("value is clamped to min on decrement", () => {
-    const onValueChange = vi.fn();
+    const onValueChange = jest.fn();
     renderNumberField({ defaultValue: 2, min: 0, max: 100, step: 5, onValueChange });
     fireEvent.keyDown(screen.getByRole("spinbutton"), { key: "ArrowDown" });
     expect(onValueChange).toHaveBeenCalledWith(0);
